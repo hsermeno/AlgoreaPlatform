@@ -23,7 +23,7 @@ function checkExpandedItemResults(&$serverChanges) {
          $deleted_records = array();
          foreach ($modelServerChanges["deleted"] as $recordID => $value) {
             if ($value['data'] != [] && property_exists($value['data'], 'requestName') && $value['data']->requestName == $modelName) {
-               if (isset($modelServerChanges["inserted"][$recordID]) && 
+               if (isset($modelServerChanges["inserted"][$recordID]) &&
                      property_exists($modelServerChanges["inserted"][$recordID]['data'], 'requestName') &&
                      $modelServerChanges["inserted"][$recordID]['data']->requestName == $modelName.'_zero') {
                   unset($modelServerChanges["inserted"][$recordID]);
@@ -144,6 +144,9 @@ function getItemsFromAncestors ($params, &$requests, $db, $minServerVersion){
    $requests['users_items']['filters']['idUser'] = array(
       'values' => ['idUser' => $_SESSION['login']['ID']],
    );
+   $requests['groups_attempts']['filters']['idGroup'] = array(
+      'values' => ['idGroupSelf' => $_SESSION['login']['idGroupSelf']],
+   );
 
    $ancestors_condition = getAncestorsCondition($db, $params, '[PREFIX]', '[FIELD]');
 
@@ -205,13 +208,28 @@ function getGroups ($params, &$requests) {
       'modes' => array('insert' => true, 'update' => true, 'delete' => true),
    );
    $requests["groups"]['model']['fields']['idUser'] = array('readOnly' => true, 'modes' => array('select' => true), 'joins' => array('users'), 'sql' => '`users`.`ID`');
+
+   // Duplicate request to groups
+   $requests["groups_invitations_left"] = $requests["groups"];
+
    $requests["groups"]["model"]["filters"]["Mine"] = array(
       "joins" => array("myInvitationsLeft"),
-      "condition"  => "(`[PREFIX]myInvitationsLeft`.`idGroupChild` = :[PREFIX_FIELD]idGroupSelf OR `[PREFIX]groups`.`ID` = :[PREFIX_FIELD]idGroupOwned OR `[PREFIX]groups`.`ID` = :[PREFIX_FIELD]idGroupSelf)",
+      "condition"  => "(`[PREFIX]groups`.`ID` = :[PREFIX_FIELD]idGroupOwned OR `[PREFIX]groups`.`ID` = :[PREFIX_FIELD]idGroupSelf)",
    );
    $requests["groups"]["filters"]["Mine"] = array(
       'values' => array(
          'idGroupOwned' => $_SESSION['login']['idGroupOwned'], // TODO: vérifier pour les tempUsers
+         'idGroupSelf'  => $_SESSION['login']['idGroupSelf'],
+      ),
+      'modes' => array('select' => true),
+   );
+
+   $requests["groups_invitations_left"]["model"]["filters"]["Mine"] = array(
+      "joins" => array("myInvitationsLeft"),
+      "condition"  => "`[PREFIX]myInvitationsLeft`.`idGroupChild` = :[PREFIX_FIELD]idGroupSelf",
+   );
+   $requests["groups_invitations_left"]["filters"]["Mine"] = array(
+      'values' => array(
          'idGroupSelf'  => $_SESSION['login']['idGroupSelf'],
       ),
       'modes' => array('select' => true),
@@ -240,6 +258,7 @@ function getGroups ($params, &$requests) {
    //$requests['groups_groups']["model"]["fields"]["idGroupParent"]["groupBy"] = "`groups_groups`.`ID`";
    if (!$_SESSION['login']['tempUser']) {
       $requests['groups_groups']['filters']['descendantsRead'] = array('modes' => array('select' => true), 'values' => array('idGroupOwned' => $_SESSION['login']['idGroupOwned']));
+      $requests['groups_groups']["filters"]["sTypeExclude"] = ['modes' => ['select' => true], 'values' => ['sType' => 'UserSelf']];
       $requests['groups_groups_invitations']['filters']['invitationsRead'] = array('modes' => array('select' => true), 'values' => array('idGroupSelf' => $_SESSION['login']['idGroupSelf']));
       //$requests['groups_groups']['filters']['invitationsAndDescendantsWrite'] = array('modes' => array('insert' => true, 'update' => true, 'delete' => true), 'values' => array('idGroupSelf' => $_SESSION['login']['idGroupSelf'], 'idRootSelf' => $idRootSelf, 'idGroupOwned' => $_SESSION['login']['idGroupOwned']));
       // TODO: find a working write filter (commented one can't work due to triggers)
@@ -288,7 +307,7 @@ function getAllLevels ($params, &$requests){
    );
    $requests["items_strings"]["filters"]["accessible"] = array('values' => array('idGroupSelf' => $_SESSION['login']['idGroupSelf']));;
    $requests["items_strings"]["readOnly"] = true;
-   
+
    $requests["users_items"]["model"]["joins"]["items_items"] =  array("type" => "LEFT", "srcTable" => "users_items", "srcField" => "idItem", "dstField" => "idItemChild");
    $requests["users_items"]["model"]["filters"]["getAllLevels"] = array(
       "joins" => array("items_items"),
@@ -320,6 +339,9 @@ function getAllLevels ($params, &$requests){
    $requests['users_items']['filters']['idUser'] = array(
       'values' => ['idUser' => $_SESSION['login']['ID']],
    );
+   $requests['groups_attempts']['filters']['idGroup'] = array(
+      'values' => ['idGroupSelf' => $_SESSION['login']['idGroupSelf']],
+   );
    $requests["items_strings"]["filters"]["getAllLevels"] = true;
    $requests["items"]["filters"]["getAllLevels"] = true;
    // groups_items slows everything down
@@ -334,15 +356,16 @@ function filterUsers(&$requests) {
       "readOnly" => true
    );
    $requests['users']['filters']['me'] = $_SESSION['login']['ID'];
+#   $requests['users']['filters']['meAndTeams'] = ['values' => ['id' => $_SESSION['login']['ID'], 'idGroup' => $_SESSION['login']['idGroupSelf']]];
 # Uncomment if you want all users but keeping private things private
-#   static $privateFields = array('sEmail', 'sCountryCode', 'sTimeZone', 'sBirthDate', 'iGraduationYear', 'sSex', 'sAddress', 'sZipcode', 'sCity', 'sLandLineNumber', 'sCellPhoneNumber', 'sDefaultLanguage', 'sFreeText', 'sWebSite', 'idUserGodfather');
+#   static $privateFields = array('sEmail', 'sCountryCode', 'sTimeZone', 'sBirthDate', 'iGraduationYear', 'iGrade', 'sSex', 'sAddress', 'sZipcode', 'sCity', 'sLandLineNumber', 'sCellPhoneNumber', 'sDefaultLanguage', 'sFreeText', 'sWebSite', 'idUserGodfather');
 #   foreach($requests['users']['model']['fields'] as $fieldName => &$field) {
 #      if ($fieldName == 'sFirstName') {
 #            $field = array('sql' => 'IF (`users`.`ID` = '.$_SESSION['login']['ID'].' OR `bPublicFirstName`, `sFirstName`, NULL)');
 #      } elseif ($fieldName == 'sLastName') {
 #            $field = array('sql' => 'IF (`users`.`ID` = '.$_SESSION['login']['ID'].' OR `bPublicLastName`, `sLastName`, NULL)');
 #      } elseif(in_array($fieldName, $privateFields)) {
-#            $field = array('sql' => 'IF (`users`.`ID` = '.$_SESSION['login']['ID'].', `'.$fieldName.'`, NULL)');
+#            $field = array('sql' => 'IF (`users`.`ID` = '.$_SESSION['login']['ID'].', `users`.`'.$fieldName.'`, NULL)');
 #      }
 #   }
 }
@@ -374,6 +397,9 @@ function setupExpandedItemsRequests($params, &$requests) {
       $requests["users_items"]["model"]["joins"]["items_items"] = array("srcTable" => "groups_items", "srcField" => "idItem", "dstField" => "idItemChild");
       $requests["users_items"]["filters"]["accessible"] = array('modes' => array('select' => true), "values" => array("idGroupSelf" => $_SESSION['login']['idGroupSelf'], "idGroupOwned" => $_SESSION['login']['idGroupOwned']));
       $requests["users_items"]["model"]["fields"]["sType"]["groupBy"] = "`users_items`.`ID`";
+      $requests["groups_attempts"]["model"]["joins"]["items_items"] = array("srcTable" => "groups_items", "srcField" => "idItem", "dstField" => "idItemChild");
+      $requests["groups_attempts"]["filters"]["accessible"] = array('modes' => array('select' => true), "values" => array("idGroupSelf" => $_SESSION['login']['idGroupSelf'], "idGroupOwned" => $_SESSION['login']['idGroupOwned']));
+      $requests["groups_attempts"]["model"]["fields"]["sType"]["groupBy"] = "`groups_attempts`.`ID`";
       //$requests["groups_groups"]["debugLogFunction"] = myDebugFunction;
       //$requests["users_items"]["debugLogFunction"] = myDebugFunction;
    }
@@ -491,36 +517,36 @@ function algoreaCustomRequest($params, &$requests, $db, $minServerVersion) {
       //unset($requests["groups_items"]);
       if ( ! $admin) {
          setupGroupsItemsRequests($requests);
-         if(isset($requests['users_answers'])) {
+/*         if(isset($requests['users_answers'])) {
             $requests["users_answers"]["filters"]["accessible"] = array(
                'values' => array('idUser' => $_SESSION['login']['ID']),
             );
          }
-         $requests['users_answers']['readOnly'] = true;
+         $requests['users_answers']['readOnly'] = true;*/
          $requests["filters"]["filters"]["accessible"] = array(
                'values' => array('idUser' => $_SESSION['login']['ID']),
             );
          //getMyGroupsItems($params, $requests);
          // groups_items slows everything down here, no idea why
          $requests['messages']['filters']['accessibleWrite'] = array(
-            'modes' => array('insert' => true, 'update' => true, 'delete' => true), 
+            'modes' => array('insert' => true, 'update' => true, 'delete' => true),
             'values' => array('idUser' => $_SESSION['login']['ID']),
          );
          $requests['messages']['writeOnly'] = true;
          $requests['threads']['filters']['accessibleWrite'] = array(
-            'modes' => array('insert' => true, 'update' => true, 'delete' => true), 
+            'modes' => array('insert' => true, 'update' => true, 'delete' => true),
             'values' => array('idUser' => $_SESSION['login']['ID']),
          );
          $requests['threads_general'] = $requests['threads'];
          $requests['threads']['filters']['accessibleHelp'] = array(
-            'modes' => array('select' => true), 
+            'modes' => array('select' => true),
             'values' => array(
                'idGroupSelf' => $_SESSION['login']['idGroupSelf']
             ),
          );
          $requests['threads']["model"]["fields"]["sType"]["groupBy"] = "`threads`.`ID`";
          $requests['threads_general']['filters']['accessibleGeneralOrMineRead'] = array(
-            'modes' => array('select' => true), 
+            'modes' => array('select' => true),
             'values' => array(
                'idUser' => $_SESSION['login']['ID'],
             ),
@@ -535,7 +561,7 @@ function algoreaCustomRequest($params, &$requests, $db, $minServerVersion) {
       } else {
          //unset($requests["users_items"]);
          unset($requests["filters"]);
-         unset($requests["users_answers"]);
+//         unset($requests["users_answers"]);
          unset($requests["users_threads"]);
          unset($requests["threads"]);
          unset($requests["messages"]);
@@ -584,6 +610,11 @@ function getSyncRequests($params, $minServerVersion) {
    $contestData = adjustContestAndGetData();
    //echo json_encode($contestData);
    $requests = syncGetTablesRequests(null, false);
+
+   // No sync for users_answers
+   unset($requests['users_answers']);
+   unset($requests['groups_login_prefixes']);
+
    $requests['messages']['lowPriority'] = true;
    $requests['users_threads']['lowPriority'] = true;
    $requests['groups_groups']['lowPriority'] = true;

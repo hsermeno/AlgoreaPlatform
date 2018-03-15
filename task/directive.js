@@ -7,7 +7,7 @@ angular.module('algorea')
       scope: false,
       template: function(elem, attrs) {
         var userItemVarStr = attrs.userItemVar ? 'user-item-var="'+attrs.userItemVar+'"' : '';
-        return '<span ng-show="loadingError">{{loadingError}}</span><iframe ng-hide="loadingError" ng-src="{{taskUrl}}" class="iframe-task" id="{{taskName}}" '+userItemVarStr+' build-task allowfullscreen></iframe>';
+        return '<span ng-show="loadingError">{{loadingError}}</span><iframe ng-hide="loadingError" ng-src="{{taskUrl}}" class="iframe-task" id="{{taskName}}" '+userItemVarStr+' build-task allowfullscreen allow="microphone"></iframe>';
       },
       link: function(scope, elem, attrs) {
          // user-item-var can be used to take a variable other than
@@ -15,7 +15,7 @@ angular.module('algorea')
          if (attrs.userItemVar) {
             scope.user_item = scope[attrs.userItemVar];
          }
-         if (attrs.readOnly) {
+         if (attrs.readOnly && attrs.readOnly != 'false') {
             scope.readOnly = true;
          }
          if (attrs.taskName) {
@@ -26,11 +26,19 @@ angular.module('algorea')
 });
 
 angular.module('algorea')
-.directive('buildTask', ['$location', '$sce', '$http', '$timeout', '$rootScope', '$state', '$interval', '$injector', 'itemService', 'pathService', '$i18next', function ($location, $sce, $http, $timeout, $rootScope, $state, $interval, $injector, itemService, pathService, $i18next) {
+  .directive('buildTask', ['$sce', '$http', '$timeout', '$rootScope', '$interval', '$injector', '$i18next', function ($sce, $http, $timeout, $rootScope, $interval, $injector, $i18next) {
    var mapService = null;
    if (config.domains.current.useMap) {
       mapService = $injector.get('mapService');
    }
+    var itemService, pathService;
+    if($injector.has('itemService')) {
+      itemService = $injector.get('itemService');
+    }
+    if($injector.has('pathService')) {
+      itemService = $injector.get('pathService');
+    }
+
    function loadTask(scope, elem, sameUrl) {
       scope.loadingError = false;
       if (scope.item.sType == 'Task') {
@@ -44,14 +52,21 @@ angular.module('algorea')
          return;
       }
       var currentId = scope.currentId;
+      scope.loadOpacity = 1;
+      var loadMsgTimeout = setTimeout(function () {
+         scope.slowLoading = true;
+         scope.$apply();
+      }, 5000);
       TaskProxyManager.getTaskProxy(scope.taskName, function(task) {
          if(scope.currentId != currentId) { return; }
+         clearTimeout(loadMsgTimeout);
          scope.task = task;
          configureTask(scope, elem, sameUrl);
       }, !sameUrl, function() {
          if(scope.currentId != currentId) { return; }
          scope.taskLoaded = true;
          scope.loadingError = $i18next.t('task_communicate_error');
+         scope.$apply();
       });
    }
    function configureTask(scope, elem, sameUrl) {
@@ -83,20 +98,43 @@ angular.module('algorea')
          }
       };
       scope.platform.updateHeight = function(height, success, error) {
+         // TODO :: remove once we are sure it's not used anymore
+         console.log("updateHeight is deprecated and shouldn't be called");
          scope.updateHeight(height);
          if (success) { success(); }
       };
+      scope.platform.updateDisplay = function(data, success, error) {
+         // Task asked the platform to update display
+         if(data.height) {
+            scope.updateHeight(data.height);
+         }
+         if(data.views) {
+            scope.setTabs(data.views);
+         }
+         if(success) { success(); }
+      };
       // move to next item in same chapter
+      scope.moveToNextImmediate = function() {
+         scope.goRightImmediateLink();
+      };
+      // move to next item
       scope.moveToNext = function() {
          scope.goRightLink();
       };
       scope.platform.askHint = function(hintToken, success, error) {
          $rootScope.$broadcast('algorea.itemTriggered', scope.item.ID);
          scope.askHintUserItemID = scope.user_item.ID;
-         $http.post('/task/task.php', {action: 'askHint', sToken: scope.user_item.sToken, hintToken: hintToken, userItemId: scope.user_item.ID}, {responseType: 'json'}).success(function(postRes) {
+         $http.post('/task/task.php', {
+           action: 'askHint',
+           sToken: scope.user_item.sToken,
+           hintToken: hintToken,
+           userItemId: scope.user_item.ID
+          }, {
+            responseType: 'json'
+          }).success(function(postRes) {
             if ( ! postRes.result) {
                error("got error from task.php: "+postRes.error);
-            } else if (!scope.canGetState || scope.user_item.ID != scope.askHintUserItemID) {
+            } else if (scope.user_item.ID != scope.askHintUserItemID) {
                error("got askHint return from another task");
             } else {
                scope.user_item.sToken = postRes.sToken;
@@ -114,30 +152,33 @@ angular.module('algorea')
          if (mode == 'cancel') {
             scope.task.reloadAnswer('', success, error);
          } else if (mode == 'nextImmediate') {
-            scope.moveToNext();
+            scope.moveToNextImmediate();
          } else {
-            if (!scope.canGetState) {console.error('canGetState = false'); return};
+            if (!scope.canGetState) {
+               console.log('Warning: canGetState = false');
+            };
             scope.task.getAnswer(function (answer) {
                if (scope.loadedUserItemID != scope.user_item.ID) error('scope.loadedUserItemID != scope.user_item.ID');
-               $http.post('/task/task.php', {action: 'askValidation', sToken: scope.user_item.sToken, sAnswer: answer, userItemId: scope.user_item.ID}, {responseType: 'json'}).success(function(postRes) {
+
+               // Get validation token to send to the task
+               $http.post('/task/task.php', {
+                 action: 'askValidation',
+                 sToken: scope.user_item.sToken,
+                 sAnswer: answer,
+                 userItemId: scope.user_item.ID
+                }, {
+                  responseType: 'json'
+                }).success(function(postRes) {
                   if (scope.loadedUserItemID != scope.user_item.ID) {
                      error('loadedUserItemID != user_item.ID');
                      return;
                   }
                   if ( ! postRes.result) {
                      error("got error from task.php: "+postRes.error);
-                  } else if (!scope.canGetState || validateUserItemID != scope.user_item.ID) {
+                  } else if (validateUserItemID != scope.user_item.ID) {
                      error('got validate from another task');
                   } else if (scope.item.sValidationType != 'Manual') {
-                     var newAnswer = ModelsManager.createRecord('users_answers');
-                     newAnswer.ID = postRes.answer.idUserAnswer;
-                     newAnswer.idItem = postRes.answer.idItemLocal;
-                     newAnswer.idUser = postRes.answer.idUser;
-                     newAnswer.sAnswer = postRes.answer.sAnswer;
-                     newAnswer.sSubmissionDate = new Date();
-                     //ModelsManager.curData.users_answers[postRes.answer.idUserAnswer] = newAnswer;
-                     ModelsManager.insertRecord('users_answers', newAnswer, 'noSync');
-                     scope.user_answer = newAnswer;
+                     // Grade the task
                      scope.gradeTask(answer, postRes.sAnswerToken, validateUserItemID, function(validated) {
                         if (success) { success(); }
                         if (validated && mode == 'next') {
@@ -149,10 +190,29 @@ angular.module('algorea')
                .error(function() {
                   error("error calling task.php");
                });
+
+               // Save state while evaluating
+               scope.task.getState(function(state) {
+                  if (scope.canGetState) {
+                     scope.user_item.sState = state;
+                     scope.user_item.sAnswer = answer;
+                     ModelsManager.updated('users_items', scope.user_item.ID);
+                  }
+               });
+            }, function() {
+              ErrorLogger.logTaskError(scope.item.sUrl);
             });
          }
       };
-      scope.taskParams = {minScore: 0, maxScore: 100, noScore: 0, readOnly: !!scope.readOnly, randomSeed: scope.user_item.idUser, options: {}, returnUrl: config.domains.current.baseUrl+'/task/task.php'};
+      scope.taskParams = {
+         minScore: 0,
+         maxScore: 100,
+         noScore: 0,
+         readOnly: !!scope.readOnly,
+         randomSeed: scope.user_item.attempt ? scope.user_item.attempt.ID : scope.user_item.idUser,
+         options: {},   
+         returnUrl: config.domains.current.baseUrl+'/task/task.php'};
+      scope.curAttemptId = scope.user_item.attempt ? scope.user_item.attempt.ID : null;
       scope.platform.getTaskParams = function(key, defaultValue, success, error) {
          var res = scope.taskParams;
          if (key) {
@@ -161,7 +221,7 @@ angular.module('algorea')
             } else if (res.options && key in res.options) {
                res = res.options[key];
             } else {
-               res = (typeof defaultValue !== 'undefined') ? defaultValue : null; 
+               res = (typeof defaultValue !== 'undefined') ? defaultValue : null;
             }
          }
          if (success) {
@@ -172,7 +232,13 @@ angular.module('algorea')
       };
       scope.gradeTask = function (answer, answerToken, validateUserItemID, success, error) {
          scope.grader.gradeTask(answer, answerToken, function(score, message, scoreToken) {
-            var postParams = {action: 'graderResult', scoreToken: scoreToken, score: score, message: message, sToken: scope.user_item.sToken};
+            var postParams = {
+              action: 'graderResult',
+              scoreToken: scoreToken,
+              score: score,
+              message: message,
+              sToken: scope.user_item.sToken
+            };
             if (!scoreToken) {
                postParams.answerToken = answerToken;
             }
@@ -186,11 +252,26 @@ angular.module('algorea')
                   return;
                }
                scope.user_item.nbTasksTried = scope.user_item.nbTasksTried+1;
+
+               // We just unlocked some items
+               if (!scope.user_item.bKeyObtained && postRes.bKeyObtained && scope.item.idItemUnlocked) {
+                  scope.user_item.bKeyObtained = true;
+                  if(!postRes.bValidated) {
+                     ModelsManager.updated('users_items', scope.user_item.ID, false, true);
+                  }
+                  SyncQueue.sentVersion = 0;
+                  SyncQueue.serverVersion = 0;
+                  SyncQueue.resetSync = true;
+                  SyncQueue.planToSend(0);
+                  alert("Félicitations ! Vous avez débloqué un ou plusieurs contenus.");
+               }
+
+               // We validated the task for the first time
                if (!scope.user_item.bValidated && postRes.bValidated) {
                   scope.user_item.sToken = postRes.sToken;
                   scope.user_item.bValidated = true;
+                  scope.user_item.bKeyObtained = true;
                   scope.user_item.sValidationDate = new Date();
-                  scope.user_answer.sGradingDate = new Date();
                   if (config.domains.current.useMap) {
                      mapService.updateSteps();
                   }
@@ -201,8 +282,11 @@ angular.module('algorea')
                         scope.setTabs(views);
                      });
                   });
+
+                  // An item has been unlocked, need to reset sync as for some
+                  // reason it doesn't get the changes
                }
-               scope.user_item.iScore = Math.max(scope.user_item.iScore, 10*score);
+               scope.user_item.iScore = Math.max(scope.user_item.iScore, score);
                $rootScope.$broadcast('algorea.itemTriggered', scope.item.ID);
                scope.$applyAsync();
                if (success) { success(postRes.bValidated); } else { return postRes.bValidated; };
@@ -213,11 +297,17 @@ angular.module('algorea')
          });
       };
       var views = {'task': true, 'solution': true, 'editor': true, 'hints': true, 'grader': true,'metadata':true};
-      scope.taskLoaded = true;
       var currentId = scope.currentId;
+      scope.loadOpacity = 0.6;
+      scope.$apply();
+      var loadMsgTimeout = setTimeout(function () {
+         scope.slowLoading = true;
+         scope.$apply();
+      }, 5000);
       scope.task.load(views, function() {
-         //scope.taskLoaded = true;
          if(scope.currentId != currentId) { return; }
+         scope.taskLoaded = true;
+         clearTimeout(loadMsgTimeout);
          scope.task.getMetaData(function(metaData) {
             scope.metaData = metaData;
             if (metaData.minWidth) {
@@ -235,12 +325,16 @@ angular.module('algorea')
             }
             $rootScope.$broadcast('layout.taskLayoutChange');
          });
-         scope.task.getViews(function(views) {
-            scope.setTabs(views);
-         });
+         $timeout(function () {
+            // Need to let the DOM refresh properly first
+            scope.task.getViews(function(views) {
+               scope.setTabs(views);
+            });
+         }, 0);
       }, function() {
          if(scope.currentId != currentId) { return; }
          scope.loadingError = $i18next.t('task_load_error');
+         scope.$apply();
       });
     }
     return {
@@ -256,6 +350,13 @@ angular.module('algorea')
          }
          if (!scope.taskName) {scope.taskName = name;}
          scope.taskIframe = elem;
+         scope.$on('algorea.attemptChanged', function(event) {
+            // Reload item after we select a new attempt
+            if (scope.user_item.attempt && scope.user_item.attempt.ID != scope.curAttemptId) {
+               scope.itemUrl = null; // Avoid considering it's the same URL as we're changing parameters
+               reinit();
+            }
+         });
          function initTask(sameUrl) {
             scope.currentView = null;
             // ID of the current instance, allows to avoid callbacks from old tasks
@@ -263,7 +364,7 @@ angular.module('algorea')
             if (scope.item.sUrl) {
                if (scope.item.bUsesAPI) {
                   var itemUrl = scope.item.sUrl;
-                  scope.taskUrl = $sce.trustAsResourceUrl(TaskProxyManager.getUrl(itemUrl, (scope.user_item ? scope.user_item.sToken : ''), 'http://algorea.pem.dev', name));
+                  scope.taskUrl = $sce.trustAsResourceUrl(TaskProxyManager.getUrl(itemUrl, (scope.user_item ? scope.user_item.sToken : ''), 'http://algorea.pem.dev', name, $rootScope.sLocale));
                   // we save the value, to compare it with the new one if iframe is reloaded
                   scope.itemUrl = itemUrl;
                } else {
@@ -276,33 +377,44 @@ angular.module('algorea')
             elem[0].src = scope.taskUrl;
             $timeout(function() { loadTask(scope, elem, sameUrl);});
          }
-         if (scope.item && (scope.item.sType == 'Task' || scope.item.sType == 'Presentation' || scope.item.sType == 'Course')) {
-            initTask(false);
+         if (scope.item && (scope.item.sType == 'Task' || scope.item.sType == 'Course')) {
+            if(scope.item.bHasAttempts && !scope.user_item.idAttemptActive) {
+               // Create an attempt first
+               scope.attemptAutoSelected = true;
+               scope.autoSelectAttempt();
+            } else {
+               initTask(false);
+            }
          }
          // function comparing two url, returning true if the iframe won't be reloaded
          // (= if the difference is only after #)
          function isSameBaseUrl(oldItemUrl, newItemUrl) {
             if (!oldItemUrl || !newItemUrl) {return false;}
             var baseOldItemUrl = oldItemUrl.indexOf('#') == -1 ? oldItemUrl : oldItemUrl.substr(0, oldItemUrl.indexOf('#'));
-            var baseNewItemUrl = newItemUrl.indexOf('#') == -1 ? newItemUrl : newItemUrl.substr(0, newItemUrl.indexOf('#'));  
+            var baseNewItemUrl = newItemUrl.indexOf('#') == -1 ? newItemUrl : newItemUrl.substr(0, newItemUrl.indexOf('#'));
             return baseNewItemUrl == baseOldItemUrl;
          }
          function reinit() {
-            if (!scope.item || (scope.item.sType !== 'Task' && scope.item.sType !== 'Presentation' && scope.item.sType !== 'Course')) {
+            // New task selected
+
+            // Resynchronise changes to users_items
+            SyncQueue.planToSend(0);
+
+            if (!scope.item || (scope.item.sType !== 'Task' && scope.item.sType !== 'Course')) {
                return;
             }
-            scope.taskLoaded = false;
-            scope.canGetState = false;
-            //scope.selectTab('task');
-            scope.currentView = null;
             angular.forEach(scope.intervals, function(interval, name) {
                $interval.cancel(interval);
             });
             scope.intervals = {};
             var sameUrl = isSameBaseUrl(scope.itemUrl, scope.item.sUrl);
             if (scope.task && !scope.task.unloaded) {
-               scope.task.unloaded = true;
                scope.task.unload(function() {
+                  scope.taskLoaded = false;
+                  scope.canGetState = false;
+                  // TODO :: did we really need that?
+//                  scope.currentView = null;
+                  scope.task.unloaded = true;
                   if (!sameUrl) {
                      TaskProxyManager.deleteTaskProxy(scope.taskName);
                      elem[0].src = '';
@@ -313,7 +425,11 @@ angular.module('algorea')
                      });
                   }
                });
+               
             } else {
+               scope.taskLoaded = false;
+               scope.canGetState = false;
+               scope.currentView = null;
                if (!sameUrl) {
                   TaskProxyManager.deleteTaskProxy(scope.taskName);
                   elem[0].src = '';
@@ -332,6 +448,20 @@ angular.module('algorea')
                reinit();
             }
          });
+         scope.$on('algorea.languageChanged', function(event) {
+            if (scope.itemUrl) {
+               scope.itemUrl = null; // Avoid considering it's the same URL as we just changed language
+               reinit();
+            }
+         });
       },
     };
+}]);
+
+
+angular.module('algorea').factory('$exceptionHandler', ['$log', function($log) {
+  return function (exception, cause) {
+    $log.error(exception, cause);
+    ErrorLogger.log(exception.message, exception.fileName, exception.lineNumber, exception.columnNumber, exception);
+  }
 }]);

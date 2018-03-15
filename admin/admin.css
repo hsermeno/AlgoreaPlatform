@@ -366,8 +366,8 @@ body {
 
 /* LOGIN */
 .loginCentered {
-   height: 300px;
-   width: 250px;
+   height: 600px;
+   width: 600px;
    margin: auto;
    position: absolute;
    bottom: 0;
@@ -395,10 +395,18 @@ body {
   }
 }
 .loginFrame {
-   width: 250px;
    border: 0px solid;
    box-shadow: 0px 0px 0px;
-   height:250px;
+}
+
+.loginCentered .loginFrame {
+   width: 600px;
+   height: 600px;
+}
+
+.loginCorner .loginFrame {
+   width: 250px;
+   height: 100px;
 }
 
 .dynatree-active > a > .dynatree-owner {
@@ -433,4 +441,31 @@ body {
    display: block;
    overflow:auto;
    height: 500px;
+}
+
+.sync-alert {
+  font-size: 75%;
+  z-index: 10000;
+  position: fixed;
+  right: 0;
+  left: 0;
+  margin-right: auto;
+  margin-left: auto;
+  padding: 5px 10px;
+  width: 30%;
+  top: 0;
+  background: #fff;
+  border: 1px solid #666;
+  border-top: 0;
+  border-radius: 0 0 4px 4px;
+  -moz-border-radius: 0 0 4px 4px;
+  -webkit-border-radius: 0 0 4px 4px;
+  -webkit-box-shadow: 0px 0px 8px 2px rgba(0,0,0,0.4);
+  -moz-box-shadow: 0px 0px 8px 2px rgba(0,0,0,0.4);
+  box-shadow: 0px 0px 8px 2px rgba(0,0,0,0.4);
+}
+
+.sync-alert .message {
+  font-weight: bold;
+  color: #933;
 }

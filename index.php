@@ -1,15 +1,25 @@
+<?php
+        require_once "config.php";
+        require_once 'offerRedirect/platform_redirect.php';
+        PlatformRedirect::process($config->shared->domains['current']);
+        $base_href = parse_url($config->shared->domains['current']->baseUrl, PHP_URL_PATH) ?: '/';
+?>
 <!DOCTYPE html>
-<html lang="fr" ng-app="algorea"  ng-controller="navigationController">
+<?php
+require_once "config.php";
+
+$defaultLanguage = $config->shared->domains['current']->defaultLanguage;
+?>
+<html lang="<?=$defaultLanguage ?>" ng-app="algorea"  ng-controller="navigationController">
   <head>
     <meta charset="utf-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta http-equiv="Content-Language" content="<?=$defaultLanguage ?>" />
     <title ng-bind="domainTitle"></title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximal-scale=1.0, user-scalable=no, minimal-scale=1.0">
-    <base href="/">
-    <script type="text/javascript">
+    <base href="<?=$base_href?>">
+      <script type="text/javascript">
       <?php
-        require_once "config.php";
-
         $assetsBaseUrl = '';
         $urlArgs = '';
         $compiledMode = false;
@@ -51,6 +61,7 @@
         echo 'var config = '.json_encode($config->shared).';';
       ?>
     </script>
+    <link href="//fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
     <?php if (!$compiledMode): ?>
       <link rel="stylesheet" href="<?= includeFile('bower_components/bootstrap/dist/css/bootstrap.min.css') ?>">
       <link href="<?= includeFile('layout/3columns-flex.css') ?>" rel="stylesheet" type="text/css" />
@@ -59,7 +70,7 @@
       <link href="<?= includeFile('layout/sidebar-left.css') ?>" rel="stylesheet" type="text/css" />
       <link href="<?= includeFile('layout/sidebar-right.css') ?>" rel="stylesheet" type="text/css" />
       <link href="<?= includeFile('groupAdmin/groupAdmin.css') ?>" rel="stylesheet" type="text/css" />
-      <link href="<?= includeFile('groupRequests/groupRequests.css') ?>" rel="stylesheet" type="text/css" />
+      <link href="<?= includeFile('profile/groups.css') ?>" rel="stylesheet" type="text/css" />
       <link rel="stylesheet" href="<?= includeFile('algorea.css') ?>" type="text/css">
       <?php if ($usesForum): ?>
         <link href="<?= includeFile('bower_components/dynatree/dist/skin/ui.dynatree.css') ?>" rel="stylesheet" type="text/css">
@@ -74,7 +85,6 @@
     <?php endif; ?>
     <link href='//fonts.googleapis.com/css?family=Roboto+Condensed:400,700' rel='stylesheet' type='text/css'>
     <link href='//fonts.googleapis.com/css?family=Roboto:300,700' rel='stylesheet' type='text/css'>
-    <link href="//fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
     <style>
     #animation-debut {
       position:absolute;
@@ -97,19 +107,21 @@
     }
     </style>
 </head>
-<body ng-controller="layoutController" id="body" ng-cloak>
+<body ng-controller="layoutController" id="body" ng-cloak ng-class="{'mobile-layout': isMobileLayout, 'has-sidebar-left-open': (hasSidebarLeft && sidebarLeftIsOpen)}">
 <?php if ($animationHtmlFile): ?>
   <iframe id="animation-debut" src="<?= $animationHtmlFile ?>" onclick="animationFinished()" style="display:none;"></iframe>
 <?php endif; ?>
-<div id="navOverlay" ng-if="navOverlay" ng-click="layout.closeNavOverlay()"></div>
+<div ng-if="showNavTopOverlay" id="navTopOverlay" ng-click="layout.closeNavTopOverlay()"></div>
+<div ng-if="showMobileNavTopOverlay" id="mobileNavTopOverlay" ng-click="layout.closeMobileNavTop()"></div>
+<div ng-if="showSidebarLeftOverlay" id="sidebarLeftOverlay" ng-click="layout.closeSidebarLeftOverlay()"></div>
 <div id="fixed-header-room" class="fixed-header-room"></div>
 <header ng-click="layout.menuClicked($event);" ng-include="templatesPrefix+'menu.html'">
 </header>
 <div id='main'>
 
-<nav ui-view="left" autoscroll="false" id="sidebar-left" class="sidebar-left" ng-hide="layout.isMenuClosed()"></nav>
+<nav ui-view="left" autoscroll="false" id="sidebar-left" class="sidebar-left" ng-class="{'sidebar-left-open': sidebarLeftIsOpen, 'sidebar-left-closed': !sidebarLeftIsOpen}" ng-show="hasSidebarLeft"></nav>
 
-<article id="view-right" ui-view="right" autoscroll="false" ng-click="layout.closeIfOpen();"></article>
+<article id="view-right" ui-view="right" autoscroll="false"></article>
 
 </div>
 
@@ -136,6 +148,7 @@ function startAnimation() {
 }
 if (location.pathname=='/' && config.domains.current.animationHtmlFile) startAnimation();
 </script>
+<script src="<?= includeFile('errors/error_logger.js') ?>"></script>
 <?php if (!$compiledMode): ?>
   <script src="<?= includeFile('bower_components/jquery/dist/jquery.min.js') ?>"></script>
   <?php if ($usesForum): ?>
@@ -145,6 +158,7 @@ if (location.pathname=='/' && config.domains.current.animationHtmlFile) startAni
     <script src="<?= includeFile('ext/inheritance.js') ?>" type="text/javascript"></script>
     <script src="<?= includeFile('commonFramework/treeview/treeview.js') ?>"></script>
   <?php endif; ?>
+  <script src="<?= includeFile('bower_components/bowser/src/bowser.js') ?>"></script>
   <script src="<?= includeFile('bower_components/angular/angular.min.js') ?>"></script>
   <script src="<?= includeFile('bower_components/angular-i18n/angular-locale_'.$config->shared->domains['current']->defaultAngularLocale.'.js') ?>"></script>
   <script src="<?= includeFile('bower_components/angular-sanitize/angular-sanitize.min.js') ?>"></script>
@@ -153,6 +167,7 @@ if (location.pathname=='/' && config.domains.current.animationHtmlFile) startAni
   <script src="<?= includeFile('bower_components/i18next/i18next.min.js') ?>"></script>
   <script src="<?= includeFile('bower_components/i18next-xhr-backend/i18nextXHRBackend.min.js') ?>"></script>
   <script src="<?= includeFile('bower_components/ng-i18next/dist/ng-i18next.min.js') ?>"></script>
+  <script src="<?= includeFile('bower_components/js-md5/build/md5.min.js') ?>"></script>
   <script src="<?= includeFile('bower_components/jschannel/src/jschannel.js') ?>"></script>
   <script src="<?= includeFile('bower_components/pem-platform/task-xd-pr.js') ?>"></script>
   <script src="<?= includeFile('commonFramework/modelsManager/modelsManager.js') ?>"></script>
@@ -170,6 +185,7 @@ if (location.pathname=='/' && config.domains.current.animationHtmlFile) startAni
   <script src="<?= includeFile('navigation/service.js') ?>"></script>
   <script src="<?= includeFile('navigation/controllers.js') ?>"></script>
   <script src="<?= includeFile('navigation/directives.js') ?>"></script>
+
   <script src="<?= includeFile('community/controller.js') ?>"></script>
   <?php if ($useMap): ?>
     <script src="<?= includeFile('bower_components/paper/dist/paper-full.min.js') ?>"></script>
@@ -181,9 +197,17 @@ if (location.pathname=='/' && config.domains.current.animationHtmlFile) startAni
   <script src="<?= includeFile('states.js') ?>"></script>
   <script src="<?= includeFile('task/controller.js') ?>"></script>
   <script src="<?= includeFile('task/directive.js') ?>"></script>
-  <script src="<?= includeFile('groupRequests/groupRequestsController.js') ?>"></script>
+
+  <script src="<?= includeFile('profile/profileController.js') ?>"></script>
+  <script src="<?= includeFile('profile/myAccountController.js') ?>"></script>
+  <script src="<?= includeFile('profile/groupsOwnerController.js') ?>"></script>
+  <script src="<?= includeFile('profile/groupsMemberController.js') ?>"></script>
+
+  <script src="<?= includeFile('groupCodePrompt/controller.js') ?>"></script>
   <script src="<?= includeFile('groupAdmin/groupAdminController.js') ?>"></script>
-  <script src="<?= includeFile('groupAdmin/groupAdminIndexController.js') ?>"></script>
+  <script src="<?= includeFile('teams/controller.js') ?>"></script>
+  <script src="<?= includeFile('groupAdmin/groupAccountsManagerController.js') ?>"></script>
+  <script src="<?= includeFile('groupAdmin/groupSubgroupsController.js') ?>"></script>
   <script src="<?= includeFile('userInfos/controller.js') ?>"></script>
   <?php if ($usesForum): ?>
     <script src="<?= includeFile('forum/forumIndexController.js') ?>"></script>
@@ -199,19 +223,19 @@ if (location.pathname=='/' && config.domains.current.animationHtmlFile) startAni
 <script>
   window.i18next.use(window.i18nextXHRBackend);
   var i18nextOpts = <?= json_encode([
-    'lng' => $config->shared->domains['current']->defaultLanguage,
+    'lng' => $defaultLanguage,
     'fallbackLng' => ['en', 'fr'],
-    'fallbackNS' => 'algorea',
-    'debug' => true,
-    'ns' =>  $config->shared->domains['current']->customStringsName ? [$config->shared->domains['current']->customStringsName, 'commonFramework', 'algorea'] : ['commonFramework', 'algorea']
+//    'debug' => true,
+    'fallbackNS' => $config->shared->domains['current']->customStringsName ? [$config->shared->domains['current']->customStringsName, 'commonFramework', 'algorea'] : ['commonFramework', 'algorea'],
+    'ns' => $config->shared->domains['current']->customStringsName ? [$config->shared->domains['current']->customStringsName, 'commonFramework', 'algorea'] : ['commonFramework', 'algorea']
     ]); ?>;
   i18nextOpts['backend'] = {
     'allowMultiLoading': false,
     'loadPath': function (lng, ns) {
                     if(ns == 'commonFramework') {
-                      return '/commonFramework/i18n/'+lng+'/'+ns+'.json';
+                      return config.domains.current.baseUrl + '/commonFramework/i18n/'+lng+'/'+ns+'.json';
                     } else {
-                      return '/i18n/'+lng+'/'+ns+'.json';
+                      return config.domains.current.baseUrl + '/i18n/'+lng+'/'+ns+'.json';
                     }
                   }
     };

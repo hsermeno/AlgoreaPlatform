@@ -17,6 +17,7 @@ function default_user_item_factory($idUser, $item, $insertId) {
       'bValidated' => 0,
       'bFinished' => 0,
       'nbTasksWithHelp' => 0,
+      'sHintsRequested' => '',
       'nbHintsCached' => 0,
       'nbCorrectionsRead' => 0,
       'iPrecision' => 0,
@@ -32,6 +33,7 @@ function default_user_item_factory($idUser, $item, $insertId) {
       'bHintsAllowed' => $item['data']->bHintsAllowed,
       'bAccessSolutions' => $item['data']->bAccessSolutions,
       'bGrayedAccess' => $item['data']->bGrayedAccess,
+      'sAncestorsComputationState' => 'todo',
       'iVersion' => 0 // TODO: really?
    );
    return array(
@@ -63,22 +65,25 @@ function createMissingUserItems($db, &$serverChanges, $type) {
 }
 
 function generateUserItemToken(&$userItem, $tokenGenerator, $item) {
+  global $config;
    static $token_fields = array(
       'bHasAccessCorrection' => null,
       'bAccessSolutions'     => null,
       'bSubmissionPossible'  => null,
       'bHintsAllowed'        => null, // from item
       'bHasSolvedTask'       => null,
+      'sHintsRequested'      => null,
       'nbHintsGiven'         => null,
       'idItem'               => null,
       'itemUrl'              => null,
       'idUser'               => null,
+      'idAttempt'            => null,
       'bIsAdmin'             => null,
       'bIsDefault'           => null,
       'sSupportedLangProg'   => null,
       'sLogin'               => null,
    );
-   if ($item['data']->bUsesAPI && ($item['data']->sType == 'Task' || $item['data']->sType == 'Course'|| $item['data']->sType == 'Presentation')) {
+   if ($item['data']->bUsesAPI && ($item['data']->sType == 'Task' || $item['data']->sType == 'Course')) {
       if (!isset($item['data']->bGrayedAccess) || $item['data']->bGrayedAccess) {
          $userItem['data']->sToken = ''; return;
       }
@@ -94,6 +99,8 @@ function generateUserItemToken(&$userItem, $tokenGenerator, $item) {
          $params['bSubmissionPossible'] = true;
       }
       $params['idUser'] = $userItem['data']->idUser;
+      $params['idAttempt'] = $userItem['data']->idAttemptActive;
+      $params['sHintsRequested'] = $userItem['data']->sHintsRequested;
       $params['nbHintsGiven'] = $userItem['data']->nbHintsCached;
       $params['bHintPossible'] = true;
       // platform needs idTask:
@@ -102,6 +109,9 @@ function generateUserItemToken(&$userItem, $tokenGenerator, $item) {
 
       $bAccessSolutions = ($userItem['data']->bAccessSolutions != '0' || $userItem['data']->bValidated != '0') ? '1': '0';
       $params['bAccessSolutions'] = $bAccessSolutions;
+
+      $params['randomSeed'] = $userItem['data']->idAttemptActive ? $userItem['data']->idAttemptActive : $userItem['data']->idUser;
+      $params['platformName'] = $config->platform->name;
 
       $token = $tokenGenerator->encodeJWS($params);
       $userItem['data']->sToken = $token;

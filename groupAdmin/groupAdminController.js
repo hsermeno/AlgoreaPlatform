@@ -77,6 +77,16 @@ angular.module('algorea').
     };
   });
 
+angular.module('algorea').
+  filter('usersOnly', function() {
+    return function(groups_groups) {
+      var r = _.filter(groups_groups, function(g) {
+        return g.child.sType == 'UserSelf';
+      })
+      return r;
+    };
+  });
+
 angular.module('algorea')
    .controller('groupAdminBreadCrumbsController', ['$scope', '$stateParams', '$i18next', function ($scope, $stateParams, $i18next) {
    'use strict';
@@ -113,10 +123,21 @@ angular.module('algorea')
    'use strict';
    $scope.error = null;
 
+
+    function validateSection(section) {
+     return section ? section : 'description'
+    }
+    $scope.section = validateSection($stateParams.section ? $stateParams.section : 'description');
+
+    $scope.selectSection = function(section) {
+      $scope.section = validateSection(section);
+      $state.go('groupAdminGroup', {section: section}, {notify: false});
+    }
+
    $scope.layout.isOnePage(true);
    $scope.layout.hasMap('never');
    $scope.groupFields = models.groups.fields;
-   
+
    function getThread(user_item) {
       if (!user_item.item) {
          return null;
@@ -274,7 +295,7 @@ angular.module('algorea')
       $scope.events.splice(_.sortedIndexBy($scope.events, event, function(event) {return event.date;}), 0, event);
       if ($scope.events.length > $scope.numberOfEvents) {
          $scope.events.shift();
-         $scope.oldestEventDate = $scope.events[$scope.events.length-1].date;   
+         $scope.oldestEventDate = $scope.events[$scope.events.length-1].date;
       }
    };
 
@@ -296,7 +317,7 @@ angular.module('algorea')
             insertEvent(userItem, 'hint', userItem.sLastHintDate);
          }
          if (userItem.sThreadStartDate > $scope.oldestEventDate) {
-            insertEvent(userItem, 'newThread', userItem.sThreadStartDate);  
+            insertEvent(userItem, 'newThread', userItem.sThreadStartDate);
          }
       });
       _.reverse($scope.events);
@@ -481,7 +502,7 @@ angular.module('algorea')
 
    $scope.generatePassword = function() {
       var string = '';
-      var stringOfAllowedChars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+      var stringOfAllowedChars = '3456789abcdefghijkmnpqrstuvwxy';
       for (var i = 0; i < 10;  i++) {
          string += stringOfAllowedChars.charAt(Math.floor(Math.random()*stringOfAllowedChars.length));
       }
@@ -505,6 +526,31 @@ angular.module('algorea')
 
    $scope.refreshPassword = function(callback) {
       $scope.group.sPassword = $scope.generatePassword();
+      $scope.saveGroup();
+   };
+
+   $scope.changeExpiration = function() {
+      if($scope.formValues.expirationTimer) {
+         $scope.group.sPasswordTimer = '01:00:00';
+      } else {
+         $scope.group.sPasswordTimer = null;
+      }
+      $scope.saveGroup();
+   };
+
+   $scope.refreshExpiration = function() {
+      $scope.group.sPasswordEnd = null;
+      $scope.saveGroup();
+   };
+
+   $scope.changeRedirect = function() {
+      if($scope.formValues.hasRedirect) {
+         $scope.group.sRedirectPath = $scope.levels[0].ID;
+      } else {
+         $scope.group.sRedirectPath = null;
+         $scope.group.bOpenContest = false;
+         $scope.formValues.hasContest = false;
+      }
       $scope.saveGroup();
    };
 
@@ -534,11 +580,11 @@ angular.module('algorea')
          } else {
             // deleting on the js side due to limitations of the requestSet deletion algorithm
             angular.forEach($scope.group.parents, function(parent) {
-               ModelsManager.deleted('groups_groups', parent.ID);   
+               ModelsManager.deleted('groups_groups', parent.ID);
             });
             ModelsManager.deleted('groups', $scope.group.ID);
             SyncQueue.planToSend(0);
-            $state.go('groupAdmin');
+            $state.go('profile', { section: 'groupsOwner'});
          }
       })
       .error(function() {
@@ -567,7 +613,7 @@ angular.module('algorea')
       })
       .error(function() {
          console.error("error calling groupAdmin/api.php");
-      }); 
+      });
    };
 
    $scope.changeAdminRole = function(group_group, sRole) {
@@ -580,7 +626,7 @@ angular.module('algorea')
       })
       .error(function() {
          console.error("error calling groupAdmin/api.php");
-      }); 
+      });
    };
 
    $scope.startSync = function(groupId, itemId, callback) {
@@ -599,11 +645,26 @@ angular.module('algorea')
    $scope.initGroup = function() {
       $scope.group = ModelsManager.getRecord('groups', $scope.groupId);
       if (!$scope.group) {
-         console.error('big problem!');
+         console.error('Group not found!');
+         $state.go('groupRequests');
          return;
       }
-      if ($scope.group.sPassword) {
-         $scope.formValues.hasPassword = true;
+      if($scope.group.sType == 'Team') {
+         $scope.error = 'groupAdmin_team_not_editable';
+      }
+      $scope.formValues.hasPassword = !!$scope.group.sPassword;
+      $scope.formValues.expirationTimer = !!$scope.group.sPasswordTimer;
+      $scope.formValues.hasRedirect = !!$scope.group.sRedirectPath;
+      if($scope.formValues.hasRedirect) {
+         var pathIDs = $scope.group.sRedirectPath.split('/');
+         $scope.redirectionSelections = [];
+         $scope.redirectionSelectionsIDs = [];
+         for(var i=0; i < pathIDs.length; i++) {
+            $scope.redirectionSelections[i] = ModelsManager.getRecord('items', pathIDs[i]);
+            $scope.redirectionSelectionsIDs[i] = pathIDs[i];
+         }
+         $scope.formValues.hasContest = !!$scope.redirectionSelections[$scope.redirectionSelections.length-1].sDuration;
+         $scope.formValues.selectedBaseRedirection = $scope.redirectionSelections[0];
       }
       $scope.usersSelected = {};
       $scope.groupsSelected = {};
@@ -683,14 +744,14 @@ angular.module('algorea')
       });
       $scope.usersSelected[user.ID] = true;
       $scope.updateEvents();
-      $scope.formValues.activeTab = 2; // selects members tab
+      $scope.section = 'progress'; // formValues.activeTab = 2; // selects members tab
    }
 
    function fillItemsListWithSonsRec(itemsList, itemsListRev, item) {
       if (!item) return;
       angular.forEach(item.children, function(child_item_item) {
          var child_item = child_item_item.child;
-         if (child_item.sType != 'Course' && child_item.sType != 'Presentation') {
+         if (child_item.sType != 'Course') {
             itemsList.push(child_item);
             itemsListRev[child_item.ID] = true;
          }
@@ -726,13 +787,58 @@ angular.module('algorea')
       $scope.itemSelected(newRootItem);
    }
 
+   // TODO :: put that in a controller to avoid having duplicate code
+   $scope.redirectionSelections = [];
+   $scope.redirectionSelectionsIDs = [];
+   $scope.redirectionSelected = function(depth) {
+      if (depth === 0) { // final dropdown
+         depth = $scope.redirectionSelections.length;
+      }
+      var itemId = $scope.redirectionSelectionsIDs[depth];
+      if (itemId == 0) {
+         depth=depth-1;
+         itemId = $scope.redirectionSelections[depth].ID;
+      }
+      var newSelections = [];
+      var newSelectionsIDs = [];
+      for (var i = 0; i < depth; i++) {
+         newSelections[i] = $scope.redirectionSelections[i];
+         newSelectionsIDs[i] = $scope.redirectionSelections[i].ID;
+      }
+      var newRootItem = ModelsManager.getRecord('items', itemId);
+      newSelections[depth] = newRootItem;
+      newSelectionsIDs[depth] = newRootItem.ID;
+      $scope.redirectionSelections = newSelections;
+      $scope.redirectionSelectionsIDs = newSelectionsIDs;
+      $scope.updateRedirection();
+   }
+
+   $scope.redirectionBaseSelected = function() {
+      $scope.redirectionSelections = [$scope.formValues.selectedLevel];
+      $scope.redirectionSelectionsIDs = [$scope.formValues.selectedLevel.ID];
+      $scope.updateRedirection();
+   }
+
+   $scope.updateRedirection = function() {
+      $scope.group.sRedirectPath = $scope.redirectionSelectionsIDs.join('/');
+      $scope.formValues.hasContest = !!$scope.redirectionSelections[$scope.redirectionSelections.length-1].sDuration;
+      $scope.group.bOpenContest = $scope.group.bOpenContest && $scope.hasContest;
+      $scope.saveGroup();
+   }
+
    $scope.itemSelected = function(item) {
       if ($scope.rootItem == item) return;
       $scope.rootItem = item;
-      $scope.itemsList = [item];
-      $scope.itemsListRev = {};
-      $scope.itemsListRev[item.ID] = true;
-      fillItemsListWithSonsRec($scope.itemsList, $scope.itemsListRev, $scope.rootItem);
+
+      // Force angular to regenerate the grid; no good way to make it better
+      $scope.itemsList = [];
+      $timeout(function() {
+         $scope.itemsList = [item];
+         $scope.itemsListRev = {};
+         $scope.itemsListRev[item.ID] = true;
+         fillItemsListWithSonsRec($scope.itemsList, $scope.itemsListRev, $scope.rootItem);
+      }, 0);
+
       $scope.startSync($scope.groupId, item.ID, function() {
          $scope.initItems();
          $scope.initGroup();
@@ -751,24 +857,30 @@ angular.module('algorea')
    }
 
    $scope.levelSelected = function() {
+      $scope.zip_message = null;
+      $scope.zip_url = null;
       $scope.itemSelected($scope.formValues.selectedLevel);
-      $scope.dropdownSelections = [];
-      $scope.dropdownSelectionsIDs = [];
-      $scope.dropdownSelections[0] = $scope.formValues.selectedLevel;
-      $scope.dropdownSelectionsIDs[0] = $scope.formValues.selectedLevel.ID;
+      $scope.dropdownSelections = [$scope.formValues.selectedLevel];
+      $scope.dropdownSelectionsIDs = [$scope.formValues.selectedLevel.ID];
    }
 
    $scope.initItems = function() {
-      var officialRootItem = ModelsManager.getRecord('items', config.domains.current.OfficialProgressItemId);
-      var customRootItem = ModelsManager.getRecord('items', config.domains.current.CustomProgressItemId);
+      var rootItemsIds = [
+         config.domains.current.OfficialProgressItemId,
+         config.domains.current.CustomProgressItemId,
+         config.domains.current.ContestRootItemId,
+         config.domains.current.CustomContestRootItemId];
       $scope.levels = [];
-      angular.forEach(officialRootItem.children, function(child) {
-         $scope.levels.push(child.child);
+      rootItemsIds.forEach(function (itemId) {
+         if(!itemId) { return; }
+         var rootItem = ModelsManager.getRecord('items', itemId);
+         if(rootItem) {
+            angular.forEach(rootItem.children, function(child) {
+               $scope.levels.push(child.child);
+            });
+         }
       });
-      angular.forEach(customRootItem.children, function(child) {
-         $scope.levels.push(child.child);
-      });
-      if (!$scope.formValues.selectedLevel) {
+      if (!$scope.formValues.selectedLevel && $scope.levels.length) {
          $scope.formValues.selectedLevel = $scope.levels[0];
          $scope.levelSelected($scope.levels[0].ID);
       }
@@ -808,7 +920,40 @@ angular.module('algorea')
       })
       .error(function() {
          console.error("error calling groupAdmin/api.php");
-      }); 
+      });
+   };
+
+   $scope.zip_btn_disabled = false;
+   $scope.zip_message = false;
+   $scope.zipExport = function(itemId, groupId) {
+      $scope.zip_btn_disabled = true;
+      $scope.zip_message = 'Please wait...';
+      $scope.zip_url = null;
+      $.ajax({
+         type: 'GET',
+         url: '/admin/zip_export.php',
+         data: {
+            itemId: itemId,
+            groupId: groupId
+         },
+         success: function(res) {
+            $scope.zip_btn_disabled = false;
+            if(res && res.file) {
+               $scope.zip_message = '';
+               $scope.zip_url = res.file;
+            } else {
+               $scope.zip_message = res;
+            }
+         },
+         error: function(request, status, err) {
+            $scope.zip_btn_disabled = false;
+            $scope.zip_message = err;
+         }
+      });
+   }
+
+   $scope.zipDownload = function() {
+      if($scope.zip_url) { window.location = $scope.zip_url; }
    };
 
    $scope.init = function() {
@@ -847,7 +992,16 @@ angular.module('algorea')
    $scope.$on('$destroy', function() {
       $scope.stopSync();
    });
-   
+
+
+   $scope.$on('login.login', function(event, data) {
+    if (data.tempUser) {
+       $state.go('profile');
+    } else {
+       $state.go('profile', { section: 'groupsOwner'});
+    }
+ });
+
    $scope.loading = true;
    itemService.onNewLoad($scope.init);
 

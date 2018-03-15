@@ -49,10 +49,27 @@ var models = {
          sDateCreated: {type: "jsdate", label: "models_groups_fields_sDateCreated_label"},
          bOpened: {type: "boolean", label: "models_groups_fields_bOpened_label", defaultValue: true},
          bFreeAccess: {type: "boolean", label: "models_groups_fields_bFreeAccess_label"},
+         idTeamItem: {type: "int", label: "models_groups_fields_idTeamItem_label", defaultValue: null},
+         iTeamParticipating: {type: "boolean", label: "models_groups_fields_iTeamParticipating_label", defaultValue: false},
          sPassword: {type: "string", label: "models_groups_fields_sPassword_label", defaultValue: ''},
+         sPasswordTimer: {type: "duration", label: "models_groups_fields_sPasswordTimer_label", defaultValue: null},
+         sPasswordEnd: {type: "string", label: "models_groups_fields_sPasswordEnd_label", defaultValue: null},
+         sRedirectPath: {type: "string", label: "models_groups_fields_sRedirectPath_label", defaultValue: null},
+         bOpenContest: {type: "boolean", label: "models_groups_fields_bOpenContest_label"},
          sType: {
             type: "enum",
-            values: {Root: {label: "models_groups_fields_sType_values_Root_label", hidden: true}, Class: {label: "models_groups_fields_sType_values_Class_label"}, Club: {label: "models_groups_fields_sType_values_Club_label"}, Friends: {label: "models_groups_fields_sType_values_Friends_label"}, Other: {label:"models_groups_fields_sType_values_Other_label"}, UserSelf: {label:"models_groups_fields_sType_values_UserSelf_label", hidden: true}, UserAdmin: {label:"models_groups_fields_sType_values_UserAdmin_label", hidden: true}, RootAdmin: {label:"models_groups_fields_sType_values_RootAdmin_label", hidden: true}, RootSelf: {label:"models_groups_fields_sType_values_RootSelf_label", hidden: true}},
+            values: {
+               Root: {label: "models_groups_fields_sType_values_Root_label", hidden: true},
+               Class: {label: "models_groups_fields_sType_values_Class_label"},
+               Team: {label: "models_groups_fields_sType_values_Team_label"},
+               Club: {label: "models_groups_fields_sType_values_Club_label"},
+               Friends: {label: "models_groups_fields_sType_values_Friends_label"},
+               Other: {label:"models_groups_fields_sType_values_Other_label"},
+               UserSelf: {label:"models_groups_fields_sType_values_UserSelf_label", hidden: true},
+               UserAdmin: {label:"models_groups_fields_sType_values_UserAdmin_label", hidden: true},
+               RootAdmin: {label:"models_groups_fields_sType_values_RootAdmin_label", hidden: true},
+               RootSelf: {label:"models_groups_fields_sType_values_RootSelf_label", hidden: true}
+            },
             label: "models_groups_fields_sType_label",
             defaultValue: "Class",
             nullInvalid: true
@@ -64,7 +81,57 @@ var models = {
          parents: {refModel: "groups_groups", key: "idGroupChild", type: "object"},
          userSelf: {refModel: "users", key: "idGroupSelf", type: "direct"},
          userOwned: {refModel: "users", key: "idGroupOwned", type: "direct"},
-         userAccess: {refModel: "users", key: "idGroupAccess", type: "direct"}
+         userAccess: {refModel: "users", key: "idGroupAccess", type: "direct"},
+         login_prefixes: {refModel: "groups_login_prefixes", key: "idGroup", type: "array"}
+      }
+   },
+
+   groups_attempts: {
+      fields: {
+          idGroup: {type: "key", label: "models_groups_attempts_fields_idGroup_label", refModel: "groups", link: "group"},
+          idItem: {type: "key", label: "models_groups_attempts_fields_idItem_label", refModel: "items", link: "item", invLink: "groups_attempts"},
+          idUserCreator: {type: "key", label: "models_groups_attempts_fields_idUserCreator_label", refModel: "users", link: "user"},
+          iOrder: {type: "int", label: "models_groups_attempts_fields_iOrder_label"},
+          iScore: {type: "float", label: "", readOnly: true},
+          iScoreComputed: {type: "float", label: "", readOnly: true},
+          iScoreReeval: {type: "float", label: "", readOnly: true},
+          iScoreDiffManual: {type: "float", label: "", readOnly: true},
+          sScoreDiffComment: {type: "string", label: "", readOnly: true},
+          nbSubmissionsAttempts: {type: "int", label: "", readOnly: true},
+          nbTasksTried: {type: "int", label: "", readOnly: true},
+          nbChildrenValidated: {type: "int", label: "", readOnly: true},
+          bValidated: {type: "boolean", label: "", readOnly: true},
+          bFinished: {type: "boolean", label: "", readOnly: true},
+          bKeyObtained: {type: "boolean", label: "", readOnly: true},
+          nbTasksWithHelp: {type: "int", label: "", readOnly: true},
+          sHintsRequested: {type: "string", label: "", readOnly: true},
+          nbHintsCached: {type: "int", label: "", readOnly: true},
+          nbCorrectionsRead: {type: "int", label: "", readOnly: true},
+          iPrecision: {type: "int", label: "", readOnly: true},
+          iAutonomy: {type: "int", label: "", readOnly: true},
+          sStartDate: {type: "jsdate", label: ""},
+          sValidationDate: {type: "jsdate", label: "", readOnly: true},
+          sLastAnswerDate: {type: "jsdate", label: "", readOnly: true},
+          sThreadStartDate: {type: "jsdate", label: "", readOnly: true},
+          sLastHintDate: {type: "jsdate", label: "", readOnly: true},
+          sFinishDate: {type: "jsdate", label: "", readOnly: true},
+          sLastActivityDate: {type: "jsdate", label: ""},
+          sContestStartDate: {type: "jsdate", label: "", readOnly: true},
+          bRanked: {type: "boolean", label: "", readOnly: true},
+          sAllLangProg: {type: "string", label: ""},
+          sState: {type: "string", label: ""},
+          sAnswer: {type: "string", label: ""},
+          sToken: {type: "string", label: "", readOnly: true}
+      },
+      links: {
+         user_answers: {refModel: "users_answers", key: "idItem", type: "array"}
+      }
+   },
+
+   groups_login_prefixes: {
+      fields: {
+        idGroup: {type: "key", label: "models_groups_login_prefixes_fields_idGroup_label", refModel: "groups", link: "parent", invLink: "login_prefixes"},
+        prefix: {type: "string", label: "models_groups_login_prefixes_fields_prefix_label"}
       }
    },
 
@@ -97,7 +164,7 @@ var models = {
                owner: {label: "models_groups_groups_fields_sRole_values_owner_label", hidden: true},
                manager: {label: "models_groups_groups_fields_sRole_values_manager_label"},
                observer: {label: "models_groups_groups_fields_sRole_values_observer_label"},
-               member: {label: "models_groups_groups_fields_sRole_values_member_label"},
+               member: {label: "models_groups_groups_fields_sRole_values_member_label"}
             },
             defaultValue: 'member',
             label: "models_groups_groups_fields_sRole_label",
@@ -105,7 +172,7 @@ var models = {
          },
          sStatusDate: {type: "jsdate", label: "models_groups_groups_fields_sStatusDate_label"},
          idUserInviting: {type: "key", label: "models_groups_groups_fields_idUserInviting_label", refModel: "users", link: "userInviting"},
-         sUserInvitingLogin: {type: "string", label: "models_groups_groups_fields_sUserInvitingLogin_label", readOnly: true},
+         sUserInvitingLogin: {type: "string", label: "models_groups_groups_fields_sUserInvitingLogin_label", readOnly: true}
       }
    },
 
@@ -118,23 +185,16 @@ var models = {
             type: "enum",
             values: {
                Root: {label: "models_items_fields_sType_values_Root_label"},
-               Category: {label: "models_items_fields_sType_values_Category_label"},
-               Level: {label: "models_items_fields_sType_values_Level_label"},
-               GenericChapter: {label: "models_items_fields_sType_values_GenericChapter_label"},
                Chapter: {label: "models_items_fields_sType_values_Chapter_label"},
-               StaticChapter: {label: "models_items_fields_sType_values_StaticChapter_label"},
-               ContestChapter: {label: "models_items_fields_sType_values_ContestChapter_label"},
-               LimitedTimeChapter: {label: "models_items_fields_sType_values_LimitedTimeChapter_label"},
-               Section: {label: "models_items_fields_sType_values_Section_label"},
                Task: {label: "models_items_fields_sType_values_Task_label"},
-               Course: {label: "models_items_fields_sType_values_Course_label"},
-               Presentation: {label: "models_items_fields_sType_values_Presentation_label"}
+               Course: {label: "models_items_fields_sType_values_Course_label"}
             },
             label: "models_items_fields_sType_label",
             defaultValue: "Chapter",
             nullInvalid: true
          },
          bUsesAPI: {type: "boolean", label: "models_items_fields_bUsesAPI_label", defaultValue: true},
+         bReadOnly: {type: "boolean", label: "models_items_fields_bReadOnly_label", defaultValue: false},
          sFullScreen: {
             type: "enum",
             values: {
@@ -149,6 +209,7 @@ var models = {
          bShowDifficulty: {type: "boolean", label: "models_items_fields_bShowDifficulty_label", defaultValue: false},
          bShowSource: {type: "boolean", label: "models_items_fields_bShowSource_label", defaultValue: false},
          bHintsAllowed: {type: "boolean", label: "models_items_fields_bHintsAllowed_label", defaultValue: false},
+         bFixedRanks: {type: "boolean", label: "models_items_fields_bFixedRanks_label", defaultValue: false},
          sValidationType: {
             type: "enum",
             widget: "radio",
@@ -177,10 +238,28 @@ var models = {
             defaultValue : 'Ready',
             nullInvalid: true
          },
-         idItemUnlocked: {type: "key", label: "models_items_fields_idItemUnlocked_label", refModel:"items"},
+         idItemUnlocked: {type: "string", label: "models_items_fields_idItemUnlocked_label"},
+         iScoreMinUnlock: {type: "int", label: "models_items_fields_iScoreMinUnlock_label"},
          sSupportedLangProg: {type: "string", label: "models_items_fields_sSupportedLangProg_label", defaultValue: '*'},
+         idDefaultLanguage: {type: "key", label: "models_items_fields_idDefaultLanguage_label", refModel: "languages", link: "defaultLanguage"},
+         sTeamMode: {
+            type: "enum",
+            widget: "radio-buttons",
+            values: {
+               All: {label: "models_items_fields_sTeamMode_values_All_label"},
+               Half: {label: "models_items_fields_sTeamMode_values_Half_label"},
+               One: {label: "models_items_fields_sTeamMode_values_One_label"},
+               None: {label: "models_items_fields_sTeamMode_values_None_label"}
+            },
+            label: "models_items_fields_sTeamMode_label",
+            defaultValue: null
+         },
+         bTeamsEditable: {type: "boolean", label: "models_items_fields_bTeamsEditable_label"},
+         idTeamInGroup: {type: "int", label: "models_items_fields_idTeamInGroup_label", refModel: "groups", link: "teamInGroup", defaultValue: null},
+         iTeamMaxMembers: {type: "int", label: "models_items_fields_iTeamMaxMembers_label"},
+         bHasAttempts: {type: "boolean", label: "models_items_fields_bHasAttempts_label", defaultValue: false},
          sAccessOpenDate: {type: "jsdate", label: "models_items_fields_sAccessOpenDate_label"},
-         sDuration: {type: "string", label: "models_items_fields_sDuration_label"},
+         sDuration: {type: "duration", label: "models_items_fields_sDuration_label", defaultValue: null},
          sEndContestDate: {type: "jsdate", label: "models_items_fields_sEndContestDate_label"},
          bShowUserInfos: {type: "boolean", label: "models_items_fields_bShowUserInfos_label"},
          sContestPhase: {
@@ -188,7 +267,8 @@ var models = {
             values: {
                Running: {label: "models_items_fields_sContestPhase_values_Running_label"},
                Analysis: {label: "models_items_fields_sContestPhase_values_Analysis_label"},
-               Closed: {label: "models_items_fields_sContestPhase_values_Closed_label"}},
+               Closed: {label: "models_items_fields_sContestPhase_values_Closed_label"}
+            },
             label: "models_items_fields_sContestPhase_label",
             defaultValue: "Running",
             nullInvalid: true
@@ -198,7 +278,13 @@ var models = {
          bGrayedAccess: {type: "boolean", label: "models_items_fields_bGrayedAccess_label", defaultValue: false, readOnly: true},
          bOwnerAccess: {type: "boolean", label: "models_items_fields_bOwnerAccess_label", defaultValue: false, readOnly: true},
          bManagerAccess: {type: "boolean", label: "models_items_fields_bManagerAccess_label", defaultValue: false, readOnly: true},
-         bAccessSolutions: {type: "boolean", label: "models_items_fields_bAccessSolutions_label", defaultValue: false, readOnly: true}
+         bAccessSolutions: {type: "boolean", label: "models_items_fields_bAccessSolutions_label", defaultValue: false, readOnly: true},
+         bTitleBarVisible: {type: "boolean", label: "models_items_fields_bTitleBarVisible_label", defaultValue: 1},
+         bTransparentFolder: {type: "boolean", label: "models_items_fields_bTransparentFolder_label", defaultValue: 0},
+         bDisplayChildrenAsTabs: {type: "boolean", label: "models_items_fields_bDisplayChildrenAsTabs_label", defaultValue: 0},
+         bCustomChapter: {type: "boolean", label: null, defaultValue: 0, readOnly: true},
+         bDisplayDetailsInParent: {type: "boolean", label: "models_items_fields_bDisplayDetailsInParent_label", defaultValue: 0},
+         groupCodeEnter: {type: "boolean", label: "models_items_fields_groupCodeEnter_label", defaultValue: 0}
       },
       links: {
          children: {refModel: "items_items", key: "idItemParent", type: "array", orderBy: "iChildOrder"},
@@ -206,8 +292,9 @@ var models = {
          strings: {refModel: "items_strings", key: "idItem", type: "array"},
          user_answers: {refModel: "users_answers", key: "idItem", type: "array"},
          user_item: {refModel: "users_items", key: "idItem", type: "object"},
+         groups_attempts: {refModel: "groups_attempts", key: "idItem", type: "object"},
          threads: {refModel: "threads", key: "idItem", type: "object"},
-         group_items: {refModel: "groups_items", key: "idItem", type: "array"}, // array better ?
+         group_items: {refModel: "groups_items", key: "idItem", type: "array"} // array better ?
          //descendants: {refModel: "items_ancestors", key: "idItemAncestor", type: "object"}, // array better ?
       },
       indexes: [
@@ -275,7 +362,7 @@ var models = {
    items_ancestors: {
       fields: {
          idItemAncestor: {type: "key", label: "models_items_ancestors_fields_idItemAncestor_label", refModel: "items", link: "itemAncestor"/*, invLink: "descendants"*/},
-         idItemChild: {type: "key", label: "models_items_ancestors_fields_idItemChild_label", refModel: "items", link: "itemDescendant"},
+         idItemChild: {type: "key", label: "models_items_ancestors_fields_idItemChild_label", refModel: "items", link: "itemDescendant"}
       },
       indexes: [
          {name: "idItemAncestor", keys: ["idItemAncestor"], values: "idItemChild"}
@@ -370,6 +457,28 @@ var models = {
           sTimeZone: {type: "string", label: "models_users_fields_sTimeZone_label"},
           sBirthDate: {type: "string", label: "models_users_fields_sBirthDate_label"},
           iGraduationYear: {type: "int", label: "models_users_fields_iGraduationYear_label"},
+          iGrade: {
+            type: "enum",
+            label: "models_users_fields_iGrade_label",
+            defaultValue: null,
+            values: {
+                "-1": {label: "models_users_fields_iGrade_values_-1_label"},
+                "-2": {label: "models_users_fields_iGrade_values_-2_label", hidden: true},
+                "0" : {label: "models_users_fields_iGrade_values_0_label"},
+                "1" : {label: "models_users_fields_iGrade_values_1_label"},
+                "2" : {label: "models_users_fields_iGrade_values_2_label"},
+                "3" : {label: "models_users_fields_iGrade_values_3_label"},
+                "4" : {label: "models_users_fields_iGrade_values_4_label"},
+                "5" : {label: "models_users_fields_iGrade_values_5_label"},
+                "6" : {label: "models_users_fields_iGrade_values_6_label"},
+                "7" : {label: "models_users_fields_iGrade_values_7_label"},
+                "8" : {label: "models_users_fields_iGrade_values_8_label"},
+                "9" : {label: "models_users_fields_iGrade_values_9_label"},
+                "10": {label: "models_users_fields_iGrade_values_10_label"},
+                "11": {label: "models_users_fields_iGrade_values_11_label"}
+            }
+          },
+          sStudentId: {type: "string", label: "models_users_fields_sStudentId_label"},
           sSex: {
              type: "enum",
              values: {Male: {label: "models_users_fields_sSex_values_Male_label"}, Female: {label: "models_users_fields_sSex_values_Female_label"}},
@@ -411,7 +520,9 @@ var models = {
           idGroupSelf: {type: "key", label: "models_users_fields_idGroupSelf_label", link: "groupSelf", refModel: "groups", invLink: "userSelf"},
           idGroupOwned: {type: "key", label: "models_users_fields_idGroupOwned_label", link: "groupOwned", refModel: "groups", invLink: "userOwned"},
           idGroupAccess: {type: "key", label: "models_users_fields_idGroupAccess_label", link: "groupAccess", refModel: "groups", invLink: "userAccess"},
-          sNotificationReadDate: {type: "jsdate", label: "models_users_fields_sNotificationReadDate_label"}
+          sNotificationReadDate: {type: "jsdate", label: "models_users_fields_sNotificationReadDate_label"},
+          loginModulePrefix: {type: "string", label: "models_users_fields_loginModulePrefix_label"},
+          allowSubgroups: {type: "boolean", label: ""}
       },
       links: {
          threads: {refModel: "threads", key: "idUserCreated", type: "object"}
@@ -420,9 +531,22 @@ var models = {
 
    users_answers: {
       fields: {
-          idUser: {type: "key", label: "models_users_answers_fields_idUser_label"},
+          idUser: {type: "key", label: "models_users_answers_fields_idUser_label", refModel: "users", link: "user"},
           idItem: {type: "key", label: "models_users_answers_fields_idItem_label", refModel: "items", link: "item", invLink: "user_answers"},
+          idAttempt: {type: "key", label: "models_users_answers_fields_idAttempt_label", refModel: "groups_attempts", link: "attempt", invLink: "user_answers"},
           sName: {type: "string", label: ""},
+          sType: {
+             type: "enum",
+             values: {
+                Submission: {label: "models_items_fields_sType_values_Submission_label"},
+                Saved: {label: "models_items_fields_sType_values_Saved_label"},
+                Current: {label: "models_items_fields_sType_values_Current_label"}
+             },
+             label: "models_items_fields_sType_label",
+             defaultValue: "Submission",
+             nullInvalid: true
+          },
+          sState: {type: "string", label: ""},
           sAnswer: {type: "string", label: ""},
           sSubmissionDate: {type: "jsdate", label: "", defaultValue: null},
           iScore: {type: "float", label: ""},
@@ -436,8 +560,10 @@ var models = {
       fields: {
           idUser: {type: "key", label: "models_users_items_fields_idUser_label", refModel: "users", link: "user"},
           idItem: {type: "key", label: "models_users_items_fields_idItem_label", refModel: "items", link: "item", invLink: "user_item"},
+          idAttemptActive: {type: "key", label: "models_users_items_fields_idAttemptActive_label", refModel: "groups_attempts", link: "attempt"},
           iScore: {type: "float", label: "", readOnly: true},
           iScoreComputed: {type: "float", label: "", readOnly: true},
+          iScoreReeval: {type: "float", label: "", readOnly: true},
           iScoreDiffManual: {type: "float", label: "", readOnly: true},
           sScoreDiffComment: {type: "string", label: "", readOnly: true},
           nbSubmissionsAttempts: {type: "int", label: "", readOnly: true},
@@ -445,7 +571,9 @@ var models = {
           nbChildrenValidated: {type: "int", label: "", readOnly: true},
           bValidated: {type: "boolean", label: "", readOnly: true},
           bFinished: {type: "boolean", label: "", readOnly: true},
+          bKeyObtained: {type: "boolean", label: "", readOnly: true},
           nbTasksWithHelp: {type: "int", label: "", readOnly: true},
+          sHintsRequested: {type: "string", label: "", readOnly: true},
           nbHintsCached: {type: "int", label: "", readOnly: true},
           nbCorrectionsRead: {type: "int", label: "", readOnly: true},
           iPrecision: {type: "int", label: "", readOnly: true},
@@ -461,6 +589,7 @@ var models = {
           bRanked: {type: "boolean", label: "", readOnly: true},
           sAllLangProg: {type: "string", label: ""},
           sState: {type: "string", label: ""},
+          sAnswer: {type: "string", label: ""},
           sToken: {type: "string", label: "", readOnly: true}
       },
 //      indexes: [
@@ -474,7 +603,7 @@ var models = {
           idThread: {type: "key", label: "models_users_threads_fields_idThread_label", refModel: "threads", link: "thread", invLink: "user_thread"},
           sLastReadDate: {type: "jsdate", label: "models_users_threads_fields_sLastReadDate_label"},
           sLastWriteDate: {type: "jsdate", label: "models_users_threads_fields_sLastWriteDate_label"},
-          bStarred: {type: "int", label: "models_users_threads_fields_bStarred_label"},
+          bStarred: {type: "int", label: "models_users_threads_fields_bStarred_label"}
       }
    }
 };

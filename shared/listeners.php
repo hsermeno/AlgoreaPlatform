@@ -2,10 +2,23 @@
 
 class Listeners {
    public static function computeAllUserItems($db) {
+      // Use a lock so that we don't execute the listener multiple times in parallel
+      $stmt = $db->query("SELECT GET_LOCK('listener_computeAllUserItems', 1);");
+      if($stmt->fetchColumn() != 1) { return; }
+
       // We mark as 'todo' all ancestors of objects marked as 'todo'
+      $db->exec("LOCK TABLES
+        users_items as ancestors WRITE,
+        users_items as descendants WRITE,
+        history_users_items WRITE,
+        items_ancestors READ,
+        history_items_ancestors READ;
+        ");
       $query = "UPDATE `users_items` as `ancestors` JOIN `items_ancestors` ON (`ancestors`.`idItem` = `items_ancestors`.`idItemAncestor` AND `items_ancestors`.`idItemAncestor` != `items_ancestors`.`idItemChild`) JOIN `users_items` as `descendants` ON (`descendants`.`idItem` = `items_ancestors`.`idItemChild` AND `descendants`.`idUser` = `ancestors`.`idUser`) SET `ancestors`.`sAncestorsComputationState` = 'todo' WHERE `descendants`.`sAncestorsComputationState` = 'todo';";
       $db->exec($query);
+      $db->exec("UNLOCK TABLES;");
       $hasChanges = true;
+      $groupsItemsChanged = false;
       while ($hasChanges) {
          // We mark as "processing" all objects that were marked as 'todo' and that have no children not marked as 'done'
          $query = "UPDATE `users_items` as `parent`
@@ -31,6 +44,26 @@ class Listeners {
               * nbChildrenValidated as the sum of children with bValidated == 1
               * bValidated, depending on the items_items.sCategory and items.sValidationType
          */
+         $updateAttemptsQuery = "
+            UPDATE users_items
+            left join
+            (select attempt_user.ID as idUser, attempts.idItem as idItem, MAX(attempts.iScore) as iScore, MAX(attempts.bValidated) as bValidated
+               from users AS attempt_user
+               join groups_attempts AS attempts
+               join groups_groups AS attempt_group ON attempts.idGroup = attempt_group.idGroupParent AND attempt_user.idGroupSelf = attempt_group.idGroupChild
+               GROUP BY attempt_user.ID, attempts.idItem
+            ) AS attempts_data ON attempts_data.idUser = users_items.idUser AND attempts_data.idItem = users_items.idItem
+            SET users_items.iScore = GREATEST(users_items.iScore, IFNULL(attempts_data.iScore, 0)),
+                users_items.bValidated = GREATEST(users_items.bValidated, IFNULL(attempts_data.bValidated, 0))
+            WHERE users_items.sAncestorsComputationState = 'processing';";
+         $db->exec($updateAttemptsQuery);
+         $updateActiveAttemptQuery = "
+            UPDATE users_items
+            JOIN groups_attempts ON groups_attempts.ID = users_items.idAttemptActive
+            SET users_items.sHintsRequested = groups_attempts.sHintsRequested
+            WHERE users_items.sAncestorsComputationState = 'processing';";
+         $db->exec($updateActiveAttemptQuery);
+
          $stmtUpdateStr = 'update `users_items`
                            join
                            (select Max(children.sLastActivityDate) as sLastActivityDate, Sum(children.nbTasksTried) as nbTasksTried, Sum(children.nbTasksWithHelp) as nbTasksWithHelp, Sum(children.nbTasksSolved) as nbTasksSolved, Sum(bValidated) as nbChildrenValidated
@@ -43,7 +76,7 @@ class Listeners {
                               left join users_items as task_children on items_items.idItemChild = task_children.idItem and task_children.idUser = :idUser
                               join items on items.ID = items_items.idItemChild
                               where items_items.idItemParent = :idItem
-                                 and items.sType != \'Course\' and items.sType != \'Presentation\' and items.bNoScore = 0) as task_children_data
+                                 and items.sType != \'Course\' and items.bNoScore = 0) as task_children_data
                          set users_items.sLastActivityDate = children_data.sLastActivityDate,
                              users_items.nbTasksTried = children_data.nbTasksTried,
                              users_items.nbTasksWithHelp = children_data.nbTasksWithHelp,
@@ -58,8 +91,7 @@ class Listeners {
                                                             if(task_children_data.nbChildrenNonValidated = 0, 1, 0)
                                                          ),
                                                          if(task_children_data.nbChildrenCategory = 0, 1, 0)
-                                                       )
-                                                       ),
+                                                       )),
                              users_items.sValidationDate = IFNULL(users_items.sValidationDate, IF(STRCMP(:sValidationType, \'Categories\'), task_children_data.maxValidationDate, task_children_data.maxValidationDateCategories))
                          where users_items.ID = :ID;';
          // query to only user_items with children
@@ -74,10 +106,71 @@ class Listeners {
          foreach ($rows as $row) {
             $stmtUpdate->execute(array('ID' => $row['ID'], 'idUser' => $row['idUser'], 'idItem' => $row['idItem'], 'sValidationType' => $row['sValidationType']));
          }
+
+         // Unlock items depending on bKeyObtained
+         $querySelectUnlocks = "
+            SELECT users.idGroupSelf as idGroup,
+                   items.idItemUnlocked as idsItems
+            FROM users_items
+            JOIN items ON users_items.idItem = items.ID
+            JOIN users ON users_items.idUser = users.ID
+            WHERE     users_items.sAncestorsComputationState = 'processing'
+                  AND users_items.bKeyObtained = 1
+                  AND items.idItemUnlocked IS NOT NULL;";
+         $queryInsertUnlocks = "
+            INSERT INTO groups_items (idGroup, idItem, sPartialAccessDate, sCachedPartialAccessDate, bCachedPartialAccess)
+            VALUES(:idGroup, :idItem, NOW(), NOW(), 1)
+            ON DUPLICATE KEY UPDATE sPartialAccessDate = NOW(), sCachedPartialAccessDate = NOW(), bCachedPartialAccess = 1;";
+         $stmt = $db->query($querySelectUnlocks);
+         $unlocks = $stmt->fetchAll();
+         foreach($unlocks as $unlock) {
+            $groupsItemsChanged = true;
+            $idsItems = explode(',', $unlock['idsItems']);
+            foreach($idsItems as $idItem) {
+               $stmt = $db->prepare($queryInsertUnlocks);
+               $stmt->execute(['idGroup' => $unlock['idGroup'], 'idItem' => $idItem]);
+            }
+         }
+
          // Objects marked as 'processing' are now marked as 'done'
          $query = "UPDATE `users_items` SET `sAncestorsComputationState` = 'done' WHERE `sAncestorsComputationState` = 'processing'";
          $hasChanges = ($db->exec($query) > 0);
       }
+
+      // Release the lock
+      $db->query("SELECT RELEASE_LOCK('listener_computeAllUserItems');")->fetchColumn();
+
+      // If items have been unlocked, need to recompute access
+      if($groupsItemsChanged) {
+         Listeners::groupsItemsAfter($db);
+      }
+   }
+
+   public static function propagateAttempts($db) {
+      // Propagate the data from an attempt to the user_items
+      // We use WRITE locks everywhere as MySQL doesn't propagate locks to
+      // triggers unless it's WRITE (even though the documentation says the
+      // opposite)
+      $db->exec("LOCK TABLES
+         users_items WRITE,
+         groups_attempts WRITE,
+         groups_groups WRITE,
+         users WRITE
+         ");
+      $queryPropagate = "
+         UPDATE users_items
+         JOIN groups_attempts ON groups_attempts.idItem = users_items.idItem
+         JOIN groups_groups ON groups_groups.idGroupParent = groups_attempts.idGroup
+         JOIN users ON users.ID = users_items.idUser AND users.idGroupSelf = groups_groups.idGroupChild
+         SET users_items.sAncestorsComputationState = 'todo'
+         WHERE groups_attempts.sAncestorsComputationState = 'todo';";
+      $db->exec($queryPropagate);
+      $queryEndPropagate = "
+         UPDATE groups_attempts
+         SET sAncestorsComputationState = 'done'
+         WHERE sAncestorsComputationState = 'todo';";
+      $db->exec($queryEndPropagate);
+      $db->exec("UNLOCK TABLES");
    }
 
    public static function UserItemsAfter($db) {
@@ -87,6 +180,15 @@ class Listeners {
       //Listeners::computeAllUserItems($db);
       syncDebug('UserItemsAfter', 'end');
    }
+   
+   public static function GroupsAttemptsAfter($db) {
+      syncDebug('GroupsAttemptsAfter', 'begin');
+      // same as above: task.php handles it
+      Listeners::propagateAttempts($db);
+      Listeners::computeAllUserItems($db);
+      syncDebug('GroupsAttemptsAfter', 'end');
+   }
+
 
    public static function createNewAncestors($db, $objectName, $upObjectName, $tablePrefix='', $baseTablePrefix='') {
       //file_put_contents(__DIR__.'/../logs/'.$objectName.'_ancestors_listeners.log', "\n".date(DATE_RFC822)."\n", FILE_APPEND);
@@ -156,12 +258,31 @@ class Listeners {
    }
 
    public static function computeAllAccess($db) {
+      // Lock all tables during computation to avoid issues
+      $queryLockTables = "LOCK TABLES
+         groups_items WRITE,
+         groups_items AS parents READ,
+         groups_items AS children READ,
+         groups_items AS parent READ,
+         groups_items AS child READ,
+         groups_items AS new_data READ,
+         history_groups_items WRITE,
+         groups_items_propagate WRITE,
+         groups_items_propagate AS parents_propagate READ,
+         items READ,
+         items_items READ;";
+
+      $queryUnlockTables = "UNLOCK TABLES;";
+
       // inserting missing groups_items_propagate
       $queryInsertMissingPropagate = "INSERT IGNORE INTO `groups_items_propagate` (`ID`, `sPropagateAccess`) ".
                                     "SELECT `groups_items`.`ID`, 'self' as `sPropagateAccess` ".
                                     "FROM `groups_items` ".
-                                    "LEFT JOIN `groups_items_propagate` on `groups_items`.`ID` = `groups_items_propagate`.`ID` ".
-                                    "WHERE `groups_items_propagate`.`ID` IS NULL;";
+                                    "WHERE `sPropagateAccess`='self'".
+                                    "ON DUPLICATE KEY UPDATE `sPropagateAccess`='self';";
+
+      // Set groups_items as set up for propagation
+      $queryUpdatePropagateAccess = "UPDATE `groups_items` SET `sPropagateAccess`='done' WHERE `sPropagateAccess`='self';";
 
       // inserting missing children of groups_items marked as 'children'
       $queryInsertMissingChildren = "INSERT IGNORE INTO `groups_items` (`idGroup`, `idItem`, `idUserCreated`, `sCachedAccessReason`, `sAccessReason`) ".
@@ -176,14 +297,14 @@ class Listeners {
       $queryMarkDoNotPropagate = "INSERT IGNORE INTO `groups_items_propagate` (`ID`, sPropagateAccess) ".
                                     "SELECT `groups_items`.`ID` as `ID`, 'done' as sPropagateAccess FROM groups_items ".
                                     "JOIN `items` on `groups_items`.`idItem` = `items`.`ID` ".
-                                    "WHERE `items`.`sType` = 'CustomContestRoot' OR `items`.`sType` = 'CustomProgressRoot' ON DUPLICATE KEY UPDATE sPropagateAccess='done';";
+                                    "WHERE `items`.`bCustomChapter` = 1 ON DUPLICATE KEY UPDATE sPropagateAccess='done';";
 
       // marking 'self' groups_items sons of groups_items marked as 'children'
       $queryMarkExistingChildren = "INSERT IGNORE INTO `groups_items_propagate` (`ID`, sPropagateAccess) ".
                                     "SELECT `children`.`ID` as `ID`, 'self' as sPropagateAccess ".
                                     "FROM `items_items` ".
                                     "JOIN `groups_items` as `parents` on `parents`.`idItem` = `items_items`.`idItemParent` ".
-                                    "JOIN `groups_items` as `children` on `children`.`idItem` = `items_items`.`idItemChild` ".
+                                    "JOIN `groups_items` as `children` on `children`.`idItem` = `items_items`.`idItemChild` AND `parents`.`idGroup` = `children`.`idGroup` ".
                                     "JOIN `groups_items_propagate` as `parents_propagate` on `parents`.`ID` = `parents_propagate`.`ID` ".
                                     "WHERE `parents_propagate`.`sPropagateAccess` = 'children' ON DUPLICATE KEY UPDATE sPropagateAccess='self';";
 
@@ -231,24 +352,21 @@ class Listeners {
                 "SET `sPropagateAccess` = 'children' ".
                 "WHERE `sPropagateAccess` = 'self';";
 
-      //file_put_contents(__DIR__.'/../logs/groups_item_listeners.log', "\n".date(DATE_RFC822)."\n", FILE_APPEND);
       $hasChanges = true;
       while ($hasChanges) {
-         $res = $db->exec($queryInsertMissingPropagate);
-         $res = $db->exec($queryMarkDoNotPropagate);
-         //file_put_contents(__DIR__.'/../logs/groups_item_listeners.log', $queryInsertMissingPropagate."\n".$res." rows updated\n", FILE_APPEND);
-         $res = $db->exec($queryMarkExistingChildren);
-         //file_put_contents(__DIR__.'/../logs/groups_item_listeners.log', $queryMarkExistingChildren."\n".$res." rows updated\n", FILE_APPEND);
+         $db->exec($queryLockTables);
          $res = $db->exec($queryInsertMissingChildren);
-         //file_put_contents(__DIR__.'/../logs/groups_item_listeners.log', $queryInsertMissingChildren."\n".$res." rows updated\n", FILE_APPEND);
+         $res = $db->exec($queryInsertMissingPropagate);
+         $res = $db->exec($queryUpdatePropagateAccess);
+         $res = $db->exec($queryMarkDoNotPropagate);
+         $res = $db->exec($queryMarkExistingChildren);
          $res = $db->exec($queryMarkFinishedItems);
-         //file_put_contents(__DIR__.'/../logs/groups_item_listeners.log', $queryMarkFinishedItems."\n".$res." rows updated\n", FILE_APPEND);
          $res = $db->exec($queryUpdateGroupItems);
-         //file_put_contents(__DIR__.'/../logs/groups_item_listeners.log', $queryUpdateGroupItems."\n".$res." rows updated\n", FILE_APPEND);
          $hasChanges = $db->exec($queryMarkChildrenItems);
-         //file_put_contents(__DIR__.'/../logs/groups_item_listeners.log', $queryMarkChildrenItems."\n".$hasChanges." rows updated (=hasChanges)\n", FILE_APPEND);
+         $db->exec($queryUnlockTables);
       }
       // remove default groups_items (veeeery slow)
+      // TODO :: maybe move to some cleaning cron
       $queryDeleteDefaultGI = "delete from `groups_items` where ".
                               "    `sCachedAccessSolutionsDate` is null ".
                               "and `sCachedPartialAccessDate` is null ".
@@ -294,4 +412,4 @@ class Listeners {
 }
 
 
-?>
+1?>

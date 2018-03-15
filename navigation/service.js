@@ -1,7 +1,7 @@
 'use strict';
 
 angular.module('algorea')
-   .service('itemService', ['$rootScope', '$timeout', 'loginService', '$i18next', function($rootScope, $timeout, loginService, $i18next) {
+   .service('itemService', ['$rootScope', '$timeout', '$interval', '$http', 'loginService', '$i18next', function($rootScope, $timeout, $interval, $http, loginService, $i18next) {
     /*
      * Simple service providing items.
      */
@@ -16,6 +16,8 @@ angular.module('algorea')
       var newLogin = null;
       var intervalIsSet = false;
       var firstSyncFailed = false; // case of first sync without session, before login
+      var usersAnswers = {}; // Stores users_answers per item
+
       function setSyncInterval() {
          if (!intervalIsSet) {
             intervalIsSet = true;
@@ -42,7 +44,7 @@ angular.module('algorea')
       }
 //      $rootScope.$on('$stateChangeSuccess', function() {
 //         var oldIds = idsToSync;
-//         var newIds = 
+//         var newIds =
 //      });
       function syncEndListener () {
          if (firstSyncFailed) { return; }
@@ -103,7 +105,7 @@ angular.module('algorea')
          // TODO: build SyncQueue.cancelCurrentSync() with a StartSyncListener
       }
       function getUserID() {
-         
+
          return SyncQueue.requests.loginData.ID;
       }
       function getLoginData() {
@@ -138,13 +140,20 @@ angular.module('algorea')
       }
       SyncQueue.addSyncEndListeners("ItemsService", syncEndListener);
       SyncQueue.addSyncStartListeners("ItemsService", syncStartListener);
-      // return a relevant name for the name of the listener in sync:
-      function getThreadSyncName(idThread, idItem, idUser) {
+      // SyncThread intervals
+      var syncThreadIntervals = {}; 
+      function stopThreadInterval(idThread, idItem, idUser) {
+         // Stop a syncThread interval and return the name
          if (idThread) {
-            return 'thread-'+idThread;
+            var name = 'thread-'+idThread;
          } else {
-            return 'usersAnswers-'+idItem+'-'+idUser;
+            var name = 'usersAnswers-'+idItem+'-'+idUser;
          }
+         if(syncThreadIntervals[name]) {
+            $interval.cancel(syncThreadIntervals[name]);
+            syncThreadIntervals[name] = null;
+         }
+         return name;
       }
       return {
          getItem: function(ID) {
@@ -192,12 +201,23 @@ angular.module('algorea')
          saveRecord: function(model, ID) {
             ModelsManager.updated(model, ID, false);
          },
-         // XXX: change this for language filtering
          getStrings: function(item) {
             if (!item || !item.strings) {
                return null;
             }
-            return item.strings[0];
+            var strings = item.strings[0];
+            for(var i=0; i<item.strings.length; i++) {
+               // User-chosen language
+               if(item.strings[i].language.sCode == $rootScope.sLocale) {
+                  strings = item.strings[i];
+                  break;
+               }
+               // Default language for this item
+               if(item.defaultLanguage && item.strings[i].language.sCode == item.defaultLanguage.sCode) {
+                  strings = item.strings[i];
+               }
+            }
+            return strings;
          },
          getUserItem: function(item, idUser) {
             if (!item) return null;
@@ -221,7 +241,8 @@ angular.module('algorea')
             if (!idUser) {
                idUser = $rootScope.myUserID;
             }
-            angular.forEach(item.user_answers, function(user_answer) {
+            if(!usersAnswers[item.ID]) { return; }
+            angular.forEach(usersAnswers[item.ID], function(user_answer) {
                if ((!result_user_answer || result_user_answer.sSubmissionDate < user_answer.sSubmissionDate) && user_answer.idUser == idUser) {
                   result_user_answer = user_answer;
                }
@@ -233,7 +254,7 @@ angular.module('algorea')
             if (!idUser) {
                idUser = $rootScope.myUserID;
             }
-            angular.forEach(item.user_answers, function(user_answer) {
+            angular.forEach(usersAnswers[item.ID], function(user_answer) {
                if (user_answer.idUser == idUser) {
                   result.push(user_answer);
                }
@@ -243,42 +264,65 @@ angular.module('algorea')
          getBrothersFromParent: function(parentID) {
             return this.getChildren(this.getItem(parentID));
          },
-         getChildren: function(item) {
+
+
+         getChildren: function(item, idUser) {
             var children = [];
             if (!item || !item.children) {
                return children;
             }
-//            console.error('getting children of '+item.ID);
             // a few convoluted checks for duplicated child items and child order
             var childrenz = [];
             var seenIDs = [];
+
             angular.forEach(item.children, function(child) {
-//               if (item.sType == 'Root') {
-//                  if (child.child.iLevel != 0 && child.child.iLevel != 127 && !(child.idItemChild in seenIDs)) {
-//                     childrenz.push(child);
-//                     seenIDs.push(child.idItemChild);
-//                  }
-//               } else
-               if (!(child.idItemChild in seenIDs) ){
+               if(seenIDs.indexOf(child.child.ID) === -1) {
                   var lang = child.child.sSupportedLangProg;
-                  if (typeof lang !== 'undefined' && (!lang || lang == '*' || lang.indexOf('Python') != -1)) {
+                  if(typeof lang !== 'undefined') { // TODO :: why? (eliminates base platform items)
                      childrenz.push(child);
                   }
-                  seenIDs.push(child.idItemChild);
+                  seenIDs.push(child.child.ID);
                }
             });
-            childrenz = childrenz.sort(function(a,b) {
+
+            // Randomize order of children when they have the same iChildOrder
+            var randomize = item.bFixedRanks;
+            if(randomize && !idUser) {
+               if(SyncQueue.requests.loginData) {
+                  idUser = SyncQueue.requests.loginData.ID;
+               } else {
+                  console.error('Tried to randomize items without idUser.');
+                  randomize = false;
+               }
+            }
+
+            childrenz = childrenz.sort(function(a, b) {
+               if(randomize && a.iChildOrder == b.iChildOrder) {
+                  // If randomized, compare using the MD5 of
+                  // idUser - idItemParent - idItemChild
+                  var md5a = md5(idUser + '-' + item.ID + '-' + a.ID);
+                  var md5b = md5(idUser + '-' + item.ID + '-' + b.ID);
+                  return md5a.localeCompare(md5b);
+               }
                return a.iChildOrder - b.iChildOrder;
             });
+
             angular.forEach(childrenz, function (child) {
                children.push(child.child);
+               children[children.length-1].item_item_ID = child.ID;
             });
             return children;
          },
+
+
          getIdsToSync: getIdsToSync,
+
+
          getItemIdByTextId: function(sTextId) {
             return ModelsManager.indexes.sTextId[sTextId];
          },
+
+
          isSonOf: function(sonItemId, parentItemId) {
             var parentItem = ModelsManager.getRecord('items', parentItemId);
             if (!parentItem) { return false; }
@@ -304,53 +348,58 @@ angular.module('algorea')
                $rootScope.$broadcast('algorea.itemTriggered', item.ID);
             }
          },
-         normalizeItemType: function(type) {
-            if (!type) return '';
-            if (type.substring(type.length - 7, type.length) === 'Chapter') {
-               type = 'Chapter';
-            }
-            if (type.substring(type.length - 4, type.length) === 'Root') {
-               type = 'Root';
-            }
-            return type;
-         },
          getItemTypeStr: function(item) {
             if (!item) return '';
-            var type = this.normalizeItemType(item.sType);
-            if (type == 'Root') return '';
+            if (item.sType == 'Root') return '';
             var typeStr;
-            if (type == 'Level') {
-               typeStr = $i18next.t('navigation_level') + (item.iLevel ? ' '+item.iLevel : '');
-            } else if(type == 'Chapter') {
+            if(item.sType == 'Chapter') {
                typeStr = $i18next.t('navigation_chapter');
-            } else if (type == 'Category') {
-               typeStr = $i18next.t('navigation_category');
-            } else if (type == 'Section') {
-               typeStr = $i18next.t('navigation_section');
-            } else if (type == 'Task') {
+            } else if (item.sType == 'Task') {
                typeStr = $i18next.t('navigation_task');
-            } else if (type == 'Course') {
+            } else if (item.sType == 'Course') {
                typeStr = $i18next.t('navigation_course');
             }
             return typeStr;
          },
          syncThread: function(idThread, idItem, idUser, callback) {
-            var endListenerName = getThreadSyncName(idThread, idItem, idUser);
+            // Start synchronizing some users_answers
+            // We stop the current syncThread to restart it directly
+            var intervalName = stopThreadInterval(idThread, idItem, idUser);
+            var syncFunc = function() {
+               $http.post('/task/task.php', {action: 'getUsersAnswers', idThread: idThread, idItem: idItem, idUser: idUser}).success(function(res) {
+                  if(res.result) {
+                     // Add new usersAnswers
+                     angular.forEach(res.usersAnswers, function(user_answer) {
+                        if(!usersAnswers[user_answer.idItem]) {
+                           usersAnswers[user_answer.idItem] = {};
+                        }
+                        usersAnswers[user_answer.idItem][user_answer.ID] = user_answer;
+                     });
+                  }
+                  if(callback) {
+                     callback();
+                     callback = null;
+                  }
+               });
+            };
+            syncFunc(callback);
+            syncThreadIntervals[intervalName] = $interval(syncFunc, 300000);
+
             if (idThread) {
-               SyncQueue.requestSets[endListenerName] = {minVersion: 0, name: 'getThread', idThread: idThread};
-            } else {
-               SyncQueue.requestSets[endListenerName] = {minVersion: 0, name: 'getUserAnswers', idItem: idItem, idUser: idUser};
+               // Use getThread to fetch other data such as messages
+               SyncQueue.requestSets[intervalName] = {minVersion: 0, name: 'getThread', idThread: idThread};
+               SyncQueue.addSyncEndListeners(intervalName, function() {
+                  SyncQueue.removeSyncEndListeners(intervalName);
+                  delete(SyncQueue.requestSets[intervalName].minVersion);
+                  callback();
+               }, false, true);
+               SyncQueue.planToSend(0);
             }
-            SyncQueue.addSyncEndListeners(endListenerName, function() {
-               SyncQueue.removeSyncEndListeners(endListenerName);
-               delete(SyncQueue.requestSets[endListenerName].minVersion);
-               callback();
-            }, false, true);
-            SyncQueue.planToSend(0);
+
          },
          unsyncThread:function(idThread, idItem, idUser) {
-            var endListenerName = getThreadSyncName(idThread, idItem, idUser);
-            delete(SyncQueue.requestSets[endListenerName]);
+            var intervalName = stopThreadInterval(idThread, idItem, idUser);
+            delete(SyncQueue.requestSets[intervalName]);
          }
       };
    }]);

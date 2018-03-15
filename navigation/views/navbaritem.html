@@ -1,30 +1,33 @@
-<div class="sidebar-left-item" ng-controller="leftNavItemController" ng-class="backgroundClass" ng-if="!item.private_showpres" title="{{item.strings[0].sTitle}} - {{mainIconTitle}}" ng-click="item.private_go();">
+<div class="sidebar-left-item" ng-controller="leftNavItemController" ng-class="backgroundClass" ng-if="!item.private_showpres" title="{{strings.sTitle}} - {{mainIconTitle}}" ng-click="item.private_go();">
    <div class="sidebar-left-item-content-container">
       <div class="sidebar-left-item-content">
-         <div class="sidebar-left-main-item" ng-if="item.ID == leftParentItemId" title="{{item.strings[0].sTitle}}">
-            <span class="item-link">{{item.strings[0].sTitle}}</span>
+         <div class="sidebar-left-main-item" ng-if="item.ID == leftParentItemId" title="{{strings.sTitle}}">
+            <span class="item-link">{{strings.sTitle}}</span>
          </div>
          <div class="sidebar-left-item-contents-icon1" ng-if="item.ID != leftParentItemId">
             <span class="material-icons {{mainIconClass}}">{{mainIconName}}</span>
          </div>
          <div class="sidebar-left-item-contents-text" ng-if="item.ID != leftParentItemId">
-            <span  class="item-link">{{item.strings[0].sTitle}}</span>
+            <span  class="item-link">{{strings.sTitle}}</span>
          </div>
       </div>
    </div>
    <div class="sidebar-left-item-final-icons-container">
       <div class="sidebar-left-item-final-icons">
-         <div class="sidebar-left-item-final-icon1" ng-if="item.idItemUnlocked && item.idItemUnlocked != 0">
-            <span class="material-icons">vpn_key</span>
+         <div class="sidebar-left-item-final-icon1" ng-if="!item.bReadOnly && (!item.bGrayedAccess || item.sDuration) && item.idItemUnlocked && item.idItemUnlocked != ''">
+            <span class="material-icons {{accessIconClass}}">vpn_key</span>
          </div>
-         <div class="sidebar-left-item-final-icon2" ng-if="!item.bGrayedAccess && item_item.sCategory == 'Challenge'">
+         <div class="sidebar-left-item-final-icon2" ng-if="!item.bReadOnly && !item.bGrayedAccess && item_item.sCategory == 'Challenge'">
             <span class="material-icons">star</span>
          </div>
-         <div class="sidebar-left-item-final-icon2" ng-if="item.bGrayedAccess && !item.sDuration">
+         <div class="sidebar-left-item-final-icon2" ng-if="!item.bReadOnly && item.bGrayedAccess && !item.sDuration">
             <span class="material-icons">lock</span>
          </div>
-         <div class="sidebar-left-item-final-icon2" ng-if="item.sDuration">
+         <div class="sidebar-left-item-final-icon2" ng-if="!item.bReadOnly && item.sDuration">
             <span class="material-icons">alarm</span>
+         </div>
+         <div class="sidebar-left-item-final-icon2" ng-if="item.bReadOnly">
+            <span class="material-icons">visibility</span>
          </div>
       </div>
    </div>
